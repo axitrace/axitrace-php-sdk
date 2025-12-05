@@ -1,0 +1,53 @@
+{
+    "name": "axitrace/php-sdk",
+    "description": "Official PHP SDK for AxiTrace event tracking and analytics API",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "axitrace",
+        "analytics",
+        "tracking",
+        "events",
+        "ecommerce",
+        "marketing"
+    ],
+    "authors": [
+        {
+            "name": "AxiTrace",
+            "email": "support@axitrace.com"
+        }
+    ],
+    "homepage": "https://axitrace.com",
+    "support": {
+        "docs": "https://stat.axitrace.com/docs",
+        "issues": "https://github.com/axitrace/php-sdk/issues"
+    },
+    "require": {
+        "php": "^7.4 || ^8.0 || ^8.1 || ^8.2 || ^8.3",
+        "guzzlehttp/guzzle": "^7.0",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6",
+        "php-coveralls/php-coveralls": "^2.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "AxiTrace\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AxiTrace\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test-coverage": "phpunit --coverage-html coverage"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
