@@ -463,10 +463,16 @@ class AxiTrace
 
         $event->setProducts($products);
 
-        // Set client identity
+        // Set client identity from cookies (CRITICAL: This links PHP SDK events to JS SDK profile)
         $clientId = $this->getVisitorId();
         if ($clientId !== null) {
             $event->setClientCustomId($clientId);
+        }
+
+        // Set session ID from cookie (CRITICAL: This enables profile matching across SDKs)
+        $sessionId = $this->getSessionId();
+        if ($sessionId !== null) {
+            $event->setSessionId($sessionId);
         }
 
         if (isset($params['email'])) {
@@ -482,6 +488,19 @@ class AxiTrace
         if (isset($params['metadata'])) {
             $event->setMetadata($params['metadata']);
             unset($params['metadata']);
+        }
+
+        // Apply Facebook cookies for CAPI matching
+        if ($this->autoReadCookies) {
+            $fbp = CookieHelper::getFbp();
+            if ($fbp !== null) {
+                $event->setFbp($fbp);
+            }
+
+            $fbc = CookieHelper::getFbc();
+            if ($fbc !== null) {
+                $event->setFbc($fbc);
+            }
         }
 
         return $this->eventsApi->send($event);

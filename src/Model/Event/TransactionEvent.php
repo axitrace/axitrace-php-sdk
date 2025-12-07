@@ -73,6 +73,21 @@ class TransactionEvent extends AbstractEvent
     private ?string $eventSalt = null;
 
     /**
+     * @var string|null Session ID for cross-SDK profile matching
+     */
+    private ?string $sessionId = null;
+
+    /**
+     * @var string|null Facebook pixel ID
+     */
+    private ?string $fbp = null;
+
+    /**
+     * @var string|null Facebook click ID
+     */
+    private ?string $fbc = null;
+
+    /**
      * @param string $orderId
      * @param string $source
      * @param Money $revenue
@@ -235,6 +250,42 @@ class TransactionEvent extends AbstractEvent
     }
 
     /**
+     * Set session ID for cross-SDK profile matching.
+     *
+     * @param string $sessionId
+     * @return self
+     */
+    public function setSessionId(string $sessionId): self
+    {
+        $this->sessionId = $sessionId;
+        return $this;
+    }
+
+    /**
+     * Set Facebook pixel ID (_fbp cookie).
+     *
+     * @param string $fbp
+     * @return self
+     */
+    public function setFbp(string $fbp): self
+    {
+        $this->fbp = $fbp;
+        return $this;
+    }
+
+    /**
+     * Set Facebook click ID (_fbc cookie).
+     *
+     * @param string $fbc
+     * @return self
+     */
+    public function setFbc(string $fbc): self
+    {
+        $this->fbc = $fbc;
+        return $this;
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function validate(): void
@@ -298,6 +349,20 @@ class TransactionEvent extends AbstractEvent
             ],
             'products' => $this->products,
         ];
+
+        // Session ID for cross-SDK profile matching (links PHP SDK to JS SDK profile)
+        if ($this->sessionId !== null) {
+            $data['sessionId'] = $this->sessionId;
+        }
+
+        // Facebook cookies for CAPI matching
+        if ($this->fbp !== null) {
+            $data['fbp'] = $this->fbp;
+        }
+
+        if ($this->fbc !== null) {
+            $data['fbc'] = $this->fbc;
+        }
 
         if ($this->discountAmount !== null) {
             $data['discountAmount'] = $this->discountAmount->toArray();
