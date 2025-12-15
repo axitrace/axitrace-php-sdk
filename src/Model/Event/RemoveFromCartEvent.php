@@ -97,8 +97,8 @@ class RemoveFromCartEvent extends AbstractEvent
             throw ValidationException::missingRequiredField('currency', 'remove_from_cart');
         }
 
-        if ($this->value <= 0) {
-            throw ValidationException::valueMustBePositive('value', $this->value);
+        if ($this->value < 0) {
+            throw ValidationException::valueMustBeNonNegative('value', $this->value);
         }
 
         if (empty($this->items)) {

@@ -112,6 +112,23 @@ class ValidationException extends AxiTraceException
     }
 
     /**
+     * Create exception for invalid value (must be non-negative, i.e., >= 0).
+     *
+     * @param string $field
+     * @param float $value
+     * @return self
+     */
+    public static function valueMustBeNonNegative(string $field, float $value): self
+    {
+        return new self(
+            sprintf('Field "%s" must be a non-negative number (>= 0). Got: %s', $field, $value),
+            400,
+            null,
+            ['field' => $field, 'value' => $value]
+        );
+    }
+
+    /**
      * Create exception for empty items array.
      *
      * @return self
