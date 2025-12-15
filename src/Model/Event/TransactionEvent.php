@@ -73,11 +73,6 @@ class TransactionEvent extends AbstractEvent
     private ?string $eventSalt = null;
 
     /**
-     * @var string|null Session ID for cross-SDK profile matching
-     */
-    private ?string $sessionId = null;
-
-    /**
      * @var string|null Facebook pixel ID
      */
     private ?string $fbp = null;
