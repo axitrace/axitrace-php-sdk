@@ -83,6 +83,29 @@ class AxiTrace
     private bool $autoReadCookies;
 
     /**
+     * Client IP address to forward to the API.
+     * This should be the end-user's IP address, not the server's IP.
+     *
+     * @var string|null
+     */
+    private ?string $clientIp = null;
+
+    /**
+     * Client user agent to forward to the API.
+     * This should be the end-user's browser user agent, not the SDK's.
+     *
+     * @var string|null
+     */
+    private ?string $clientUserAgent = null;
+
+    /**
+     * Page URL to use for events without URL (e.g., transactions).
+     *
+     * @var string|null
+     */
+    private ?string $pageUrl = null;
+
+    /**
      * @param Config $config
      * @param GuzzleClient|null $guzzleClient
      */
@@ -92,6 +115,9 @@ class AxiTrace
         $this->httpClient = new HttpClient($config, $guzzleClient);
         $this->eventsApi = new EventsApi($this->httpClient);
         $this->autoReadCookies = true;
+
+        // Auto-detect client IP and user agent from PHP superglobals if available
+        $this->autoDetectClientData();
     }
 
     /**
@@ -180,6 +206,168 @@ class AxiTrace
     }
 
     /**
+     * Set client IP address to forward to the API.
+     * IMPORTANT: For server-side events (like transactions), this should be
+     * the end-user's IP address, not your server's IP.
+     *
+     * @param string $clientIp
+     * @return self
+     */
+    public function setClientIp(string $clientIp): self
+    {
+        $this->clientIp = $clientIp;
+        return $this;
+    }
+
+    /**
+     * Get the client IP address that will be forwarded.
+     *
+     * @return string|null
+     */
+    public function getClientIp(): ?string
+    {
+        return $this->clientIp;
+    }
+
+    /**
+     * Set client user agent to forward to the API.
+     * IMPORTANT: For server-side events (like transactions), this should be
+     * the end-user's browser user agent, not a server-side default.
+     *
+     * @param string $clientUserAgent
+     * @return self
+     */
+    public function setClientUserAgent(string $clientUserAgent): self
+    {
+        $this->clientUserAgent = $clientUserAgent;
+        return $this;
+    }
+
+    /**
+     * Get the client user agent that will be forwarded.
+     *
+     * @return string|null
+     */
+    public function getClientUserAgent(): ?string
+    {
+        return $this->clientUserAgent;
+    }
+
+    /**
+     * Set the page URL for events without URL (e.g., server-side transactions).
+     * IMPORTANT: This URL should match a domain verified in your Facebook pixel settings.
+     *
+     * @param string $pageUrl
+     * @return self
+     * @throws \InvalidArgumentException If the URL is not valid
+     */
+    public function setPageUrl(string $pageUrl): self
+    {
+        // Validate URL to prevent malformed data being sent to Facebook CAPI
+        if (!filter_var($pageUrl, FILTER_VALIDATE_URL)) {
+            throw new \InvalidArgumentException('Invalid page URL: ' . $pageUrl);
+        }
+        $this->pageUrl = $pageUrl;
+        return $this;
+    }
+
+    /**
+     * Get the page URL.
+     *
+     * @return string|null
+     */
+    public function getPageUrl(): ?string
+    {
+        return $this->pageUrl;
+    }
+
+    /**
+     * Auto-detect client IP and user agent from PHP superglobals.
+     * This is called automatically on construction but can be disabled.
+     *
+     * @return self
+     */
+    public function autoDetectClientData(): self
+    {
+        // Auto-detect IP from various headers (in order of priority)
+        if ($this->clientIp === null) {
+            $ipHeaders = [
+                'HTTP_CF_CONNECTING_IP',     // Cloudflare
+                'HTTP_X_FORWARDED_FOR',      // Standard proxy header
+                'HTTP_X_REAL_IP',            // Nginx
+                'HTTP_CLIENT_IP',            // Some proxies
+                'HTTP_X_CLIENT_IP',          // Some proxies
+                'REMOTE_ADDR',               // Direct connection
+            ];
+
+            foreach ($ipHeaders as $header) {
+                if (!empty($_SERVER[$header])) {
+                    // For X-Forwarded-For, take the first IP (client IP)
+                    $ip = $_SERVER[$header];
+                    if (strpos($ip, ',') !== false) {
+                        $ips = array_map('trim', explode(',', $ip));
+                        $ip = $ips[0]; // First IP is the client
+                    }
+                    if ($this->isValidIp($ip)) {
+                        $this->clientIp = $ip;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Auto-detect user agent
+        if ($this->clientUserAgent === null && !empty($_SERVER['HTTP_USER_AGENT'])) {
+            $this->clientUserAgent = $_SERVER['HTTP_USER_AGENT'];
+        }
+
+        // Auto-detect page URL from referer or current URL
+        if ($this->pageUrl === null) {
+            // Try HTTP_REFERER first (for API calls from a web page)
+            // SECURITY: Validate URL to prevent malformed data being sent to Facebook CAPI
+            if (!empty($_SERVER['HTTP_REFERER']) && filter_var($_SERVER['HTTP_REFERER'], FILTER_VALIDATE_URL)) {
+                $this->pageUrl = $_SERVER['HTTP_REFERER'];
+            }
+            // Try to construct from REQUEST_URI
+            elseif (!empty($_SERVER['HTTP_HOST']) && !empty($_SERVER['REQUEST_URI'])) {
+                $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                $constructedUrl = $scheme . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
+                // Validate the constructed URL
+                if (filter_var($constructedUrl, FILTER_VALIDATE_URL)) {
+                    $this->pageUrl = $constructedUrl;
+                }
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Disable auto-detection of client data.
+     * Call this if you want to manually set client IP/user agent.
+     *
+     * @return self
+     */
+    public function clearClientData(): self
+    {
+        $this->clientIp = null;
+        $this->clientUserAgent = null;
+        $this->pageUrl = null;
+        return $this;
+    }
+
+    /**
+     * Check if an IP address is valid.
+     *
+     * @param string $ip
+     * @return bool
+     */
+    private function isValidIp(string $ip): bool
+    {
+        return filter_var($ip, FILTER_VALIDATE_IP) !== false;
+    }
+
+    /**
      * Get visitor ID from cookie.
      *
      * @return string|null
@@ -221,7 +409,28 @@ class AxiTrace
     public function track(EventInterface $event): Response
     {
         $this->applyIdentifiers($event);
+        $this->syncClientDataToHttpClient();
+
+        // Set page URL on event if not already set and we have one
+        if ($this->pageUrl !== null && method_exists($event, 'setUrl') && method_exists($event, 'getUrl')) {
+            if (empty($event->getUrl())) {
+                $event->setUrl($this->pageUrl);
+            }
+        }
+
         return $this->eventsApi->send($event);
+    }
+
+    /**
+     * Sync client data (IP, user agent) to the HTTP client.
+     * This ensures the ingestion API receives the real client data.
+     *
+     * @return void
+     */
+    private function syncClientDataToHttpClient(): void
+    {
+        $this->httpClient->setClientIp($this->clientIp);
+        $this->httpClient->setClientUserAgent($this->clientUserAgent);
     }
 
     /**
@@ -502,6 +711,14 @@ class AxiTrace
                 $event->setFbc($fbc);
             }
         }
+
+        // Apply page URL for event_source_url in Facebook CAPI
+        if ($this->pageUrl !== null && method_exists($event, 'setUrl')) {
+            $event->setUrl($this->pageUrl);
+        }
+
+        // Sync client data and send event
+        $this->syncClientDataToHttpClient();
 
         return $this->eventsApi->send($event);
     }

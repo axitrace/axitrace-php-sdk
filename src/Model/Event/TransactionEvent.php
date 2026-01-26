@@ -83,6 +83,14 @@ class TransactionEvent extends AbstractEvent
     private ?string $fbc = null;
 
     /**
+     * Page URL for event_source_url in Facebook CAPI.
+     * This should be a URL that matches a verified domain in your Facebook pixel settings.
+     *
+     * @var string|null
+     */
+    private ?string $url = null;
+
+    /**
      * @param string $orderId
      * @param string $source
      * @param Money $revenue
@@ -281,6 +289,29 @@ class TransactionEvent extends AbstractEvent
     }
 
     /**
+     * Set page URL for event_source_url in Facebook CAPI.
+     * This URL should match a verified domain in your Facebook pixel settings.
+     *
+     * @param string $url
+     * @return self
+     */
+    public function setUrl(string $url): self
+    {
+        $this->url = $url;
+        return $this;
+    }
+
+    /**
+     * Get page URL.
+     *
+     * @return string|null
+     */
+    public function getUrl(): ?string
+    {
+        return $this->url;
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function validate(): void
@@ -357,6 +388,11 @@ class TransactionEvent extends AbstractEvent
 
         if ($this->fbc !== null) {
             $data['fbc'] = $this->fbc;
+        }
+
+        // URL for event_source_url in Facebook CAPI
+        if ($this->url !== null) {
+            $data['url'] = $this->url;
         }
 
         if ($this->discountAmount !== null) {

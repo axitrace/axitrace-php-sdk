@@ -30,6 +30,20 @@ class HttpClient
     private Client $client;
 
     /**
+     * Client IP address to forward (end-user's IP).
+     *
+     * @var string|null
+     */
+    private ?string $clientIp = null;
+
+    /**
+     * Client user agent to forward (end-user's browser).
+     *
+     * @var string|null
+     */
+    private ?string $clientUserAgent = null;
+
+    /**
      * @param Config $config
      * @param Client|null $client
      */
@@ -37,6 +51,30 @@ class HttpClient
     {
         $this->config = $config;
         $this->client = $client ?? $this->createClient();
+    }
+
+    /**
+     * Set client IP to forward in requests.
+     *
+     * @param string|null $clientIp
+     * @return self
+     */
+    public function setClientIp(?string $clientIp): self
+    {
+        $this->clientIp = $clientIp;
+        return $this;
+    }
+
+    /**
+     * Set client user agent to forward in requests.
+     *
+     * @param string|null $clientUserAgent
+     * @return self
+     */
+    public function setClientUserAgent(?string $clientUserAgent): self
+    {
+        $this->clientUserAgent = $clientUserAgent;
+        return $this;
     }
 
     /**
@@ -99,11 +137,22 @@ class HttpClient
      */
     private function request(string $method, string $endpoint, array $data = [], array $query = []): Response
     {
+        $headers = [
+            'Content-Type' => 'application/json',
+        ];
+
+        // Forward client IP and user agent via custom headers
+        // These allow the ingestion API to use the real client data instead of the SDK's
+        if ($this->clientIp !== null) {
+            $headers['X-Client-IP'] = $this->clientIp;
+        }
+        if ($this->clientUserAgent !== null) {
+            $headers['X-Client-User-Agent'] = $this->clientUserAgent;
+        }
+
         $options = [
             RequestOptions::AUTH => [$this->config->getSecretKey(), ''],
-            RequestOptions::HEADERS => [
-                'Content-Type' => 'application/json',
-            ],
+            RequestOptions::HEADERS => $headers,
         ];
 
         if (!empty($data)) {
