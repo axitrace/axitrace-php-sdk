@@ -699,6 +699,12 @@ class AxiTrace
             unset($params['metadata']);
         }
 
+        // Apply remaining params (attribution data like fbclid, utm_source, fbp, fbc, etc.)
+        // CRITICAL: This enables server-side attribution when JS SDK PageView fails
+        if (!empty($params)) {
+            $event->setParams($params);
+        }
+
         // Apply Facebook cookies for CAPI matching
         if ($this->autoReadCookies) {
             $fbp = CookieHelper::getFbp();

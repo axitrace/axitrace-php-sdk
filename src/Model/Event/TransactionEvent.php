@@ -407,6 +407,8 @@ class TransactionEvent extends AbstractEvent
             $data['eventSalt'] = $this->eventSalt;
         }
 
-        return $data;
+        // Include additional params (attribution data like fbclid, utm_source, etc.)
+        // CRITICAL: This ensures server-side attribution data is sent with the event
+        return $this->addParamsToArray($data);
     }
 }
