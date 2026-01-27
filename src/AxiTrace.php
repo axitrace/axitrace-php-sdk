@@ -48,6 +48,62 @@ use GuzzleHttp\Client as GuzzleClient;
 class AxiTrace
 {
     /**
+     * URL parameters to extract for attribution tracking.
+     * These capture ad click IDs and campaign parameters for:
+     * - Facebook Conversions API (fbclid, campaign_id, adset_id, ad_id)
+     * - Google Ads (gclid, gbraid, wbraid)
+     * - TikTok Events API (ttclid)
+     * - Other ad platforms (msclkid, twclid, epik, li_fat_id, sccid, rdt_cid)
+     * - UTM parameters for analytics
+     */
+    private const ATTRIBUTION_URL_PARAMS = [
+        // Facebook
+        'fbclid',       // Facebook Click ID from ad clicks
+        'campaign_id',  // Facebook Dynamic URL Parameter: {{campaign.id}}
+        'adset_id',     // Facebook Dynamic URL Parameter: {{adset.id}}
+        'ad_id',        // Facebook Dynamic URL Parameter: {{ad.id}}
+        // Google
+        'gclid',        // Google Click ID
+        'gbraid',       // Google App Campaign Click ID (iOS)
+        'wbraid',       // Google Web-to-App Click ID
+        // TikTok
+        'ttclid',       // TikTok Click ID
+        // Microsoft/Bing
+        'msclkid',      // Microsoft/Bing Click ID
+        // Twitter/X
+        'twclid',       // Twitter/X Click ID
+        // Pinterest
+        'epik',         // Pinterest Click ID
+        // LinkedIn
+        'li_fat_id',    // LinkedIn First-party Ad Tracking ID
+        // Snapchat
+        'sccid',        // Snapchat Click ID
+        // Reddit
+        'rdt_cid',      // Reddit Click ID
+        // UTM Parameters
+        'utm_source',
+        'utm_medium',
+        'utm_campaign',
+        'utm_term',
+        'utm_content',
+        'utm_id',
+    ];
+
+    /**
+     * Cookie names to extract for attribution tracking.
+     * These capture browser/click IDs set by ad platform pixels:
+     * - _fbp: Facebook Browser ID (set by FB Pixel)
+     * - _fbc: Facebook Click ID Cookie (derived from fbclid)
+     * - _ttp: TikTok Browser ID (set by TikTok Pixel)
+     * - _ga: Google Analytics Client ID
+     */
+    private const ATTRIBUTION_COOKIES = [
+        '_fbp',  // Facebook Browser ID
+        '_fbc',  // Facebook Click ID Cookie
+        '_ttp',  // TikTok Browser ID
+        '_ga',   // Google Analytics Client ID
+    ];
+    /**
      * @var Config
      */
     private Config $config;
@@ -104,6 +160,14 @@ class AxiTrace
      * @var string|null
      */
     private ?string $pageUrl = null;
+
+    /**
+     * Auto-detected attribution parameters from URL ($_GET) and cookies ($_COOKIE).
+     * These are automatically applied to all events when autoReadCookies is enabled.
+     *
+     * @var array<string, string>
+     */
+    private array $attributionParams = [];
 
     /**
      * @param Config $config
@@ -339,7 +403,156 @@ class AxiTrace
             }
         }
 
+        // Auto-detect attribution parameters from URL ($_GET) and cookies ($_COOKIE)
+        // CRITICAL: This captures fbclid, utm_source, _fbp, _fbc, etc. when JS SDK fails
+        // to send PageView (e.g., in Facebook In-App Browser WebView)
+        $this->autoDetectAttribution();
+
         return $this;
+    }
+
+    /**
+     * Auto-detect attribution parameters from URL ($_GET) and cookies ($_COOKIE).
+     *
+     * This method captures tracking parameters for server-side events when the
+     * JavaScript SDK fails to send PageView (e.g., in Facebook In-App Browser WebView,
+     * network issues, or slow SDK loading).
+     *
+     * CRITICAL FOR FACEBOOK CAPI:
+     * - fbclid improves Event Match Quality by capturing the click ID from URL
+     * - _fbp (fbp) improves matching by ~36% (browser ID)
+     * - _fbc (fbc) contains the click attribution data
+     *
+     * SECURITY:
+     * - All values are sanitized to prevent injection attacks
+     * - Control characters are stripped
+     * - Values are truncated to prevent memory exhaustion
+     * - Facebook cookies are validated for correct format
+     *
+     * @return self
+     */
+    public function autoDetectAttribution(): self
+    {
+        // Maximum reasonable length for attribution parameters (security: prevent memory exhaustion)
+        $maxLength = 500;
+
+        // Extract URL parameters (fbclid, utm_source, gclid, etc.)
+        foreach (self::ATTRIBUTION_URL_PARAMS as $param) {
+            if (isset($_GET[$param]) && $_GET[$param] !== '') {
+                $sanitized = $this->sanitizeAttributionValue((string) $_GET[$param], $maxLength);
+                if ($sanitized !== '') {
+                    $this->attributionParams[$param] = $sanitized;
+                }
+            }
+        }
+
+        // Extract attribution cookies (_fbp, _fbc, _ttp, _ga)
+        foreach (self::ATTRIBUTION_COOKIES as $cookieName) {
+            if (isset($_COOKIE[$cookieName]) && $_COOKIE[$cookieName] !== '') {
+                // Remove underscore prefix for param names (ingestion API expects fbp, not _fbp)
+                $paramName = ltrim($cookieName, '_');
+
+                // Don't override if already set (URL param takes precedence)
+                if (isset($this->attributionParams[$paramName])) {
+                    continue;
+                }
+
+                $value = (string) $_COOKIE[$cookieName];
+
+                // Validate Facebook cookie format (fb.X.TIMESTAMP.VALUE)
+                if (($paramName === 'fbp' || $paramName === 'fbc') && !$this->isValidFacebookCookie($value)) {
+                    continue;
+                }
+
+                $sanitized = $this->sanitizeAttributionValue($value, $maxLength);
+                if ($sanitized !== '') {
+                    $this->attributionParams[$paramName] = $sanitized;
+                }
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Sanitize attribution parameter value.
+     *
+     * SECURITY: Prevents injection of control characters and excessively long strings.
+     *
+     * @param string $value Raw value from URL or cookie
+     * @param int $maxLength Maximum allowed length
+     * @return string Sanitized value
+     */
+    private function sanitizeAttributionValue(string $value, int $maxLength): string
+    {
+        // Limit length to prevent memory exhaustion
+        $value = substr($value, 0, $maxLength);
+
+        // Remove control characters (0x00-0x1F and 0x7F) but keep printable chars
+        $value = preg_replace('/[\x00-\x1F\x7F]/', '', $value);
+
+        return trim($value ?? '');
+    }
+
+    /**
+     * Validate Facebook cookie format (_fbp or _fbc).
+     *
+     * Format: fb.X.TIMESTAMP.VALUE
+     * - _fbp: fb.1.1558571054389.1098115397
+     * - _fbc: fb.1.1554763741205.AbCdEfGhIjKl...
+     *
+     * @param string $value Cookie value
+     * @return bool True if valid format
+     */
+    private function isValidFacebookCookie(string $value): bool
+    {
+        return (bool) preg_match('/^fb\.\d+\.\d+\..+$/', $value);
+    }
+
+    /**
+     * Manually set attribution parameters.
+     * Use this when you want to pass attribution data from a framework Request object
+     * (e.g., Symfony, Laravel) instead of using PHP superglobals.
+     *
+     * SECURITY: All values are sanitized before storing.
+     *
+     * @param array<string, string> $params Attribution parameters (fbclid, utm_source, fbp, etc.)
+     * @return self
+     */
+    public function setAttributionParams(array $params): self
+    {
+        $maxLength = 500;
+
+        // Sanitize all incoming parameters
+        $sanitizedParams = [];
+        foreach ($params as $key => $value) {
+            if (!is_string($key) || $value === null || $value === '') {
+                continue;
+            }
+
+            // Validate Facebook cookies if they're being set
+            if (($key === 'fbp' || $key === 'fbc') && !$this->isValidFacebookCookie((string) $value)) {
+                continue;
+            }
+
+            $sanitized = $this->sanitizeAttributionValue((string) $value, $maxLength);
+            if ($sanitized !== '') {
+                $sanitizedParams[$key] = $sanitized;
+            }
+        }
+
+        $this->attributionParams = array_merge($this->attributionParams, $sanitizedParams);
+        return $this;
+    }
+
+    /**
+     * Get auto-detected attribution parameters.
+     *
+     * @return array<string, string>
+     */
+    public function getAttributionParams(): array
+    {
+        return $this->attributionParams;
     }
 
     /**
@@ -658,6 +871,14 @@ class AxiTrace
         array $products,
         array $params = []
     ): Response {
+        // Merge auto-detected attribution params with user-provided params
+        // User-provided params have higher priority (override auto-detected)
+        // CRITICAL: This ensures server-side attribution when JS SDK PageView fails
+        // NOTE: Attribution is applied regardless of autoReadCookies flag - it's from URL params, not cookies
+        if (!empty($this->attributionParams)) {
+            $params = array_merge($this->attributionParams, $params);
+        }
+
         $source = $params['source'] ?? TransactionEvent::SOURCE_WEB_DESKTOP;
         unset($params['source']);
 
@@ -855,6 +1076,13 @@ class AxiTrace
      */
     public function formSubmit(string $label, array $formData, array $params = []): Response
     {
+        // Merge auto-detected attribution params with user-provided params
+        // CRITICAL: This ensures server-side attribution when JS SDK PageView fails
+        // NOTE: Attribution is applied regardless of autoReadCookies flag - it's from URL params, not cookies
+        if (!empty($this->attributionParams)) {
+            $params = array_merge($this->attributionParams, $params);
+        }
+
         $event = new FormSubmitEvent($label);
         $event->setFormParams($formData);
 
@@ -876,6 +1104,14 @@ class AxiTrace
         if (!empty($params)) {
             $event->setParams($params);
         }
+
+        // Apply page URL for event_source_url in Facebook CAPI
+        if ($this->pageUrl !== null && method_exists($event, 'setUrl')) {
+            $event->setUrl($this->pageUrl);
+        }
+
+        // Sync client data and send
+        $this->syncClientDataToHttpClient();
 
         return $this->eventsApi->send($event);
     }
@@ -1018,6 +1254,22 @@ class AxiTrace
             if ($fbc !== null) {
                 $event->setFbc($fbc);
             }
+
+            // Apply auto-detected attribution params (fbclid, utm_source, etc.)
+            // CRITICAL: This ensures server-side attribution when JS SDK PageView fails
+            // NOTE: This is inside autoReadCookies block for Facebook cookies,
+            // but attribution URL params are applied below regardless
+        }
+
+        // Always apply auto-detected attribution params from URL ($_GET)
+        // These are NOT cookies and should be applied regardless of autoReadCookies flag
+        // This includes: fbclid, utm_source, utm_medium, gclid, ttclid, etc.
+        if (!empty($this->attributionParams) && method_exists($event, 'setParams')) {
+            // Get existing params and merge with attribution
+            // Attribution params have lower priority - existing params override
+            $existingParams = method_exists($event, 'getParams') ? $event->getParams() : [];
+            $mergedParams = array_merge($this->attributionParams, $existingParams);
+            $event->setParams($mergedParams);
         }
     }
 }

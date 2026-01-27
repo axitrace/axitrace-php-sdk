@@ -67,21 +67,79 @@ class CookieHelper
     /**
      * Get Facebook pixel ID from cookie.
      *
-     * @return string|null
+     * SECURITY: Validates the cookie format before returning.
+     * Valid format: fb.X.TIMESTAMP.VALUE (e.g., fb.1.1558571054389.1098115397)
+     *
+     * @return string|null Validated _fbp value or null if invalid/missing
      */
     public static function getFbp(): ?string
     {
-        return self::getCookie(self::COOKIE_FBP);
+        $value = self::getCookie(self::COOKIE_FBP);
+        if ($value === null) {
+            return null;
+        }
+
+        // Validate Facebook cookie format
+        if (!self::isValidFacebookCookie($value)) {
+            return null;
+        }
+
+        return self::sanitizeCookieValue($value);
     }
 
     /**
      * Get Facebook click ID from cookie.
      *
-     * @return string|null
+     * SECURITY: Validates the cookie format before returning.
+     * Valid format: fb.X.TIMESTAMP.VALUE (e.g., fb.1.1554763741205.AbCdEfGhIjKl)
+     *
+     * @return string|null Validated _fbc value or null if invalid/missing
      */
     public static function getFbc(): ?string
     {
-        return self::getCookie(self::COOKIE_FBC);
+        $value = self::getCookie(self::COOKIE_FBC);
+        if ($value === null) {
+            return null;
+        }
+
+        // Validate Facebook cookie format
+        if (!self::isValidFacebookCookie($value)) {
+            return null;
+        }
+
+        return self::sanitizeCookieValue($value);
+    }
+
+    /**
+     * Validate Facebook cookie format (_fbp or _fbc).
+     *
+     * Format: fb.X.TIMESTAMP.VALUE
+     * - _fbp: fb.1.1558571054389.1098115397
+     * - _fbc: fb.1.1554763741205.AbCdEfGhIjKl...
+     *
+     * @param string $value Cookie value
+     * @return bool True if valid format
+     */
+    private static function isValidFacebookCookie(string $value): bool
+    {
+        return (bool) preg_match('/^fb\.\d+\.\d+\..+$/', $value);
+    }
+
+    /**
+     * Sanitize cookie value to prevent injection attacks.
+     *
+     * @param string $value Raw cookie value
+     * @return string Sanitized value
+     */
+    private static function sanitizeCookieValue(string $value): string
+    {
+        // Limit length to prevent memory exhaustion (500 chars is plenty for any cookie)
+        $value = substr($value, 0, 500);
+
+        // Remove control characters (0x00-0x1F and 0x7F) but keep printable chars
+        $value = preg_replace('/[\x00-\x1F\x7F]/', '', $value);
+
+        return trim($value ?? '');
     }
 
     /**
