@@ -920,23 +920,36 @@ class AxiTrace
             unset($params['metadata']);
         }
 
-        // Apply remaining params (attribution data like fbclid, utm_source, fbp, fbc, etc.)
+        // Promote Facebook identifiers to the dedicated TransactionEvent fields.
+        // The ingestion API maps only the root-level fbp/fbc keys of the
+        // transaction payload to Facebook CAPI matching — values left inside the
+        // generic params object are not read for these fields. Explicit values
+        // passed via $params win; cookie auto-read acts as a fallback.
+        $fbp = isset($params['fbp']) && is_string($params['fbp']) && $this->isValidFacebookCookie($params['fbp'])
+            ? $params['fbp']
+            : null;
+        $fbc = isset($params['fbc']) && is_string($params['fbc']) && $this->isValidFacebookCookie($params['fbc'])
+            ? $params['fbc']
+            : null;
+        unset($params['fbp'], $params['fbc']);
+
+        if ($this->autoReadCookies) {
+            $fbp = $fbp ?? CookieHelper::getFbp();
+            $fbc = $fbc ?? CookieHelper::getFbc();
+        }
+
+        if ($fbp !== null) {
+            $event->setFbp($fbp);
+        }
+
+        if ($fbc !== null) {
+            $event->setFbc($fbc);
+        }
+
+        // Apply remaining params (attribution data like fbclid, utm_source, etc.)
         // CRITICAL: This enables server-side attribution when JS SDK PageView fails
         if (!empty($params)) {
             $event->setParams($params);
-        }
-
-        // Apply Facebook cookies for CAPI matching
-        if ($this->autoReadCookies) {
-            $fbp = CookieHelper::getFbp();
-            if ($fbp !== null) {
-                $event->setFbp($fbp);
-            }
-
-            $fbc = CookieHelper::getFbc();
-            if ($fbc !== null) {
-                $event->setFbc($fbc);
-            }
         }
 
         // Apply page URL for event_source_url in Facebook CAPI
