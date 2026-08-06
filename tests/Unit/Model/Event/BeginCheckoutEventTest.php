@@ -87,16 +87,19 @@ class BeginCheckoutEventTest extends TestCase
         $event->validate();
     }
 
-    public function testValidateZeroValue(): void
+    /**
+     * A zero-value checkout is legitimate (fully discounted cart, free sample, 100%
+     * voucher), so validation accepts it. Only negative values are rejected.
+     */
+    public function testValidateAcceptsZeroValue(): void
     {
         $event = (new BeginCheckoutEvent('USD', 0))
             ->setClientId('visitor-123')
             ->addItem(new Product('SKU-001'));
 
-        $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage('positive');
-
         $event->validate();
+
+        $this->assertEquals(0, $event->toArray()['value']);
     }
 
     public function testValidateNegativeValue(): void
@@ -106,7 +109,7 @@ class BeginCheckoutEventTest extends TestCase
             ->addItem(new Product('SKU-001'));
 
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage('positive');
+        $this->expectExceptionMessage('non-negative');
 
         $event->validate();
     }

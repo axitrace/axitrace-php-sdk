@@ -119,6 +119,12 @@ abstract class AbstractEvent implements EventInterface
     /**
      * Set customer phone number.
      *
+     * @deprecated This writes into the generic params bag, which the ingestion API does
+     * NOT read for CAPI/CRM identity matching. For TransactionEvent and FormSubmitEvent
+     * (the events that carry a ClientIdentity), call setClientPhone() instead so the phone
+     * ends up in the "client" object where the API actually looks for it. This method is
+     * kept for backward compatibility and for events that only carry free-form params.
+     *
      * @param string $phone
      * @return static
      */

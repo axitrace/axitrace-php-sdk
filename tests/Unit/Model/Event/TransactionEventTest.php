@@ -7,6 +7,7 @@ namespace AxiTrace\Tests\Unit\Model\Event;
 use AxiTrace\Exception\ValidationException;
 use AxiTrace\Model\Event\TransactionEvent;
 use AxiTrace\Model\Money;
+use AxiTrace\Model\Product;
 use PHPUnit\Framework\TestCase;
 
 class TransactionEventTest extends TestCase
@@ -218,6 +219,122 @@ class TransactionEventTest extends TestCase
 
         $this->assertArrayHasKey('eventSalt', $array);
         $this->assertEquals('unique-event-id-123', $array['eventSalt']);
+    }
+
+    public function testScalarFinalUnitPriceIsNormalizedToMoneyShape(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');
+        $event->setClientCustomId('visitor-123');
+        // The natural thing to write: a bare number, not {amount, currency}.
+        $event->addProduct(['sku' => 'SKU-001', 'name' => 'Test Product', 'finalUnitPrice' => 89.99, 'quantity' => 1]);
+
+        $array = $event->toArray();
+
+        $this->assertEquals(['amount' => 89.99, 'currency' => 'USD'], $array['products'][0]['finalUnitPrice']);
+    }
+
+    public function testFinalUnitPriceArrayFormWithoutCurrencyDefaultsToTransactionCurrency(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'EUR', 'CARD');
+        $event->setClientCustomId('visitor-123');
+        $event->addProduct(['sku' => 'SKU-001', 'name' => 'Test Product', 'finalUnitPrice' => ['amount' => 89.99], 'quantity' => 1]);
+
+        $array = $event->toArray();
+
+        $this->assertEquals(['amount' => 89.99, 'currency' => 'EUR'], $array['products'][0]['finalUnitPrice']);
+    }
+
+    public function testInvalidFinalUnitPriceThrowsValidationException(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');
+        $event->setClientCustomId('visitor-123');
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('finalUnitPrice');
+
+        $event->addProduct(['sku' => 'SKU-001', 'name' => 'Test Product', 'finalUnitPrice' => 'not-a-number', 'quantity' => 1]);
+    }
+
+    public function testInvalidFinalUnitPriceArrayWithoutAmountThrowsValidationException(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');
+        $event->setClientCustomId('visitor-123');
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('amount');
+
+        $event->addProduct(['sku' => 'SKU-001', 'name' => 'Test Product', 'finalUnitPrice' => ['currency' => 'USD'], 'quantity' => 1]);
+    }
+
+    public function testNumericStringQuantityIsCastToInt(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');
+        $event->setClientCustomId('visitor-123');
+        $event->addProduct(['sku' => 'SKU-001', 'name' => 'Test Product', 'finalUnitPrice' => 89.99, 'quantity' => '3']);
+
+        $array = $event->toArray();
+
+        $this->assertSame(3, $array['products'][0]['quantity']);
+    }
+
+    public function testAddProductAcceptsProductInstance(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');
+        $event->setClientCustomId('visitor-123');
+
+        $product = (new Product('SKU-001'))
+            ->setItemName('Test Product')
+            ->setPrice(89.99)
+            ->setQuantity(2);
+
+        $event->addProduct($product);
+
+        $array = $event->toArray();
+
+        $this->assertEquals('SKU-001', $array['products'][0]['sku']);
+        $this->assertEquals('Test Product', $array['products'][0]['name']);
+        $this->assertEquals(['amount' => 89.99, 'currency' => 'USD'], $array['products'][0]['finalUnitPrice']);
+        $this->assertSame(2, $array['products'][0]['quantity']);
+    }
+
+    public function testSetProductsAcceptsMixOfArraysAndProductInstances(): void
+    {
+        $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');
+        $event->setClientCustomId('visitor-123');
+
+        $product = (new Product('SKU-002'))->setItemName('From Model')->setPrice(20.0);
+
+        $event->setProducts([
+            ['sku' => 'SKU-001', 'name' => 'From Array', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+            $product,
+        ]);
+
+        $array = $event->toArray();
+
+        $this->assertCount(2, $array['products']);
+        $this->assertEquals('SKU-002', $array['products'][1]['sku']);
+        $this->assertEquals(['amount' => 20.0, 'currency' => 'USD'], $array['products'][1]['finalUnitPrice']);
+    }
+
+    public function testEventSaltPropagatesThroughToArray(): void
+    {
+        $event = $this->createValidEvent();
+        $event->setEventSalt('order-123-salt');
+
+        $array = $event->toArray();
+
+        $this->assertSame('order-123-salt', $array['eventSalt']);
+    }
+
+    public function testSetClientPhoneIsReadFromClientObjectNotParams(): void
+    {
+        $event = $this->createValidEvent();
+        $event->setClientPhone('+15551234567');
+
+        $array = $event->toArray();
+
+        $this->assertSame('+15551234567', $array['client']['phone']);
+        $this->assertArrayNotHasKey('params', $array);
     }
 
     private function createValidEvent(): TransactionEvent

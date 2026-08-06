@@ -96,6 +96,20 @@ class FormSubmitEvent extends AbstractEvent
     }
 
     /**
+     * Set client phone number (E.164 recommended, e.g. +14155552671).
+     * Unlike AbstractEvent::setPhone(), this is stored on the client identity object,
+     * which is what the ingestion API reads for CAPI/CRM matching.
+     *
+     * @param string $phone
+     * @return self
+     */
+    public function setClientPhone(string $phone): self
+    {
+        $this->client->setPhone($phone);
+        return $this;
+    }
+
+    /**
      * Set form email.
      *
      * @param string $email

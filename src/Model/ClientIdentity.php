@@ -30,6 +30,15 @@ class ClientIdentity
     private ?string $email = null;
 
     /**
+     * Customer phone number (E.164 recommended, e.g. +14155552671).
+     * Read by the ingestion API for CAPI/CRM matching, unlike the generic
+     * params.phone value set via AbstractEvent::setPhone().
+     *
+     * @var string|null
+     */
+    private ?string $phone = null;
+
+    /**
      * Create from array.
      *
      * @param array<string, mixed> $data
@@ -53,6 +62,10 @@ class ClientIdentity
 
         if (isset($data['email'])) {
             $client->setEmail($data['email']);
+        }
+
+        if (isset($data['phone'])) {
+            $client->setPhone($data['phone']);
         }
 
         return $client;
@@ -83,6 +96,10 @@ class ClientIdentity
             $data['email'] = $this->email;
         }
 
+        if ($this->phone !== null) {
+            $data['phone'] = $this->phone;
+        }
+
         return $data;
     }
 
@@ -96,7 +113,8 @@ class ClientIdentity
         return $this->customId !== null
             || $this->id !== null
             || $this->uuid !== null
-            || $this->email !== null;
+            || $this->email !== null
+            || $this->phone !== null;
     }
 
     // Fluent setters
@@ -141,6 +159,16 @@ class ClientIdentity
         return $this;
     }
 
+    /**
+     * @param string $phone
+     * @return self
+     */
+    public function setPhone(string $phone): self
+    {
+        $this->phone = $phone;
+        return $this;
+    }
+
     // Getters
 
     /**
@@ -173,5 +201,13 @@ class ClientIdentity
     public function getEmail(): ?string
     {
         return $this->email;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getPhone(): ?string
+    {
+        return $this->phone;
     }
 }

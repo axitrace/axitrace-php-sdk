@@ -318,6 +318,58 @@ class AxiTrace
     }
 
     /**
+     * Apply the identifiers needed to send events from outside a web request
+     * (queue worker, cron job, webhook handler, CLI script).
+     *
+     * WHY THIS IS REQUIRED: transaction() and friends resolve the visitor via
+     * getVisitorId()/getSessionId(), which fall back to reading $_COOKIE through
+     * CookieHelper. Outside a web request $_COOKIE is empty, so without this call the
+     * event is still accepted by the API (HTTP 200) but ships with NO client identifier,
+     * NO session ID, and a server IP/user agent instead of the visitor's - the conversion
+     * is then silently unattributed with no error anywhere. Call this before track()/
+     * transaction()/etc. whenever you are not inside the original HTTP request that
+     * produced the event (e.g. a "send transaction after payment webhook" job).
+     *
+     * @param array<string, string|null> $context Recognized keys, all optional:
+     *   - 'clientId' or 'customId': the visitor ID normally read from the vt_vid cookie
+     *   - 'sessionId': the session ID normally read from the vt_sid cookie
+     *   - 'ip': the end-user's IP address (NOT your server's IP)
+     *   - 'userAgent': the end-user's browser user agent (NOT a server-side default)
+     * @return self
+     *
+     * @example
+     * // Inside a queue job processing a payment webhook, using visitor data captured
+     * // at checkout time and stored alongside the order:
+     * $axiTrace->withContext([
+     *     'clientId' => $order->getVisitorId(),   // from vt_vid, captured client-side
+     *     'sessionId' => $order->getSessionId(),  // from vt_sid, captured client-side
+     *     'ip' => $order->getCustomerIp(),
+     *     'userAgent' => $order->getCustomerUserAgent(),
+     * ])->transaction($orderId, $revenue, $value, $currency, $paymentMethod, $products);
+     */
+    public function withContext(array $context): self
+    {
+        $clientId = $context['clientId'] ?? $context['customId'] ?? null;
+        if (is_string($clientId) && $clientId !== '') {
+            $this->setClientId($clientId);
+        }
+
+        if (isset($context['sessionId']) && is_string($context['sessionId']) && $context['sessionId'] !== '') {
+            $this->setSessionId($context['sessionId']);
+        }
+
+        if (isset($context['ip']) && is_string($context['ip']) && $context['ip'] !== '') {
+            $this->setClientIp($context['ip']);
+        }
+
+        if (isset($context['userAgent']) && is_string($context['userAgent']) && $context['userAgent'] !== '') {
+            $this->setClientUserAgent($context['userAgent']);
+        }
+
+        return $this;
+    }
+
+    /**
      * Set the page URL for events without URL (e.g., server-side transactions).
      * IMPORTANT: This URL should match a domain verified in your Facebook pixel settings.
      *
@@ -855,8 +907,15 @@ class AxiTrace
      * @param float $value
      * @param string $currency
      * @param string $paymentMethod
-     * @param array<array<string, mixed>> $products
-     * @param array<string, mixed> $params
+     * @param array<array<string, mixed>|\AxiTrace\Model\Product> $products
+     * @param array<string, mixed> $params Recognized keys (all optional): 'source', 'email',
+     *   'discount_amount' + 'discount_currency', 'metadata', 'fbp', 'fbc', and
+     *   'event_salt'/'eventSalt' - set this to your orderId (or another value stable across
+     *   retries) so a retried call does not create a duplicate transaction; /v1/transaction
+     *   performs NO server-side dedup, eventSalt is the only guard. Any remaining keys are
+     *   forwarded as event params (e.g. attribution data). This parameter is fully
+     *   backward-compatible: existing calls that omit it, or that don't set 'event_salt',
+     *   behave exactly as before.
      * @return Response
      * @throws ValidationException
      * @throws ApiException
@@ -892,6 +951,17 @@ class AxiTrace
         );
 
         $event->setProducts($products);
+
+        // Event salt for client-side deduplication (recommended: use orderId).
+        // /v1/transaction performs NO server-side dedup, so this is the only guard against
+        // a retried call creating a duplicate transaction. Accepts either key so callers
+        // coming from the snake_case param convention used elsewhere in this method, or from
+        // TransactionEvent's own camelCase setEventSalt(), both feel natural.
+        $eventSalt = $params['event_salt'] ?? $params['eventSalt'] ?? null;
+        unset($params['event_salt'], $params['eventSalt']);
+        if ($eventSalt !== null && $eventSalt !== '') {
+            $event->setEventSalt((string) $eventSalt);
+        }
 
         // Set client identity from cookies (CRITICAL: This links PHP SDK events to JS SDK profile)
         $clientId = $this->getVisitorId();

@@ -431,4 +431,12 @@ class Product
     {
         return $this->currency;
     }
+
+    /**
+     * @return string|null
+     */
+    public function getSku(): ?string
+    {
+        return $this->sku;
+    }
 }
