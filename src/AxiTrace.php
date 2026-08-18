@@ -562,6 +562,38 @@ class AxiTrace
     }
 
     /**
+     * Read the first non-empty string among $keys out of $params and remove every alias
+     * from the array, so a consumed match key is never also forwarded as a generic event
+     * param (where the ingestion API would ignore it).
+     *
+     * @param array<string, mixed> $params Modified in place.
+     * @param array<int, string> $keys Aliases in priority order.
+     * @return string|null
+     */
+    private static function pullClientField(array &$params, array $keys): ?string
+    {
+        $found = null;
+
+        foreach ($keys as $key) {
+            if (!array_key_exists($key, $params)) {
+                continue;
+            }
+
+            $value = $params[$key];
+            unset($params[$key]);
+
+            if ($found === null && is_scalar($value)) {
+                $trimmed = trim((string) $value);
+                if ($trimmed !== '') {
+                    $found = $trimmed;
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
      * Manually set attribution parameters.
      * Use this when you want to pass attribution data from a framework Request object
      * (e.g., Symfony, Laravel) instead of using PHP superglobals.
@@ -909,6 +941,7 @@ class AxiTrace
      * @param string $paymentMethod
      * @param array<array<string, mixed>|\AxiTrace\Model\Product> $products
      * @param array<string, mixed> $params Recognized keys (all optional): 'source', 'email',
+     *   'phone', 'first_name', 'last_name', 'city', 'state', 'zip', 'country',
      *   'discount_amount' + 'discount_currency', 'metadata', 'fbp', 'fbc', and
      *   'event_salt'/'eventSalt' - set this to your orderId (or another value stable across
      *   retries) so a retried call does not create a duplicate transaction; /v1/transaction
@@ -916,6 +949,13 @@ class AxiTrace
      *   forwarded as event params (e.g. attribution data). This parameter is fully
      *   backward-compatible: existing calls that omit it, or that don't set 'event_salt',
      *   behave exactly as before.
+     *
+     *   The buyer identity keys ('phone' and the name/address group) are match keys, not
+     *   reporting fields: Meta CAPI hashes them into fn/ln/ct/st/zp/country and TikTok into
+     *   first_name/last_name/city/state/zip_code/country. Pass plain text; if your shop
+     *   holds a billing address, sending it is the single largest available improvement to
+     *   Purchase Event Match Quality. camelCase spellings (firstName, lastName, postalCode,
+     *   zipCode) are accepted too.
      * @return Response
      * @throws ValidationException
      * @throws ApiException
@@ -979,6 +1019,22 @@ class AxiTrace
             $event->setClientEmail($params['email']);
             unset($params['email']);
         }
+
+        // Buyer identity match keys. Consumed here rather than forwarded as generic event
+        // params, because the ingestion API reads them off the transaction's client object.
+        $phone = self::pullClientField($params, ['phone']);
+        if ($phone !== null) {
+            $event->setClientPhone($phone);
+        }
+
+        $event->setClientAddress(
+            self::pullClientField($params, ['first_name', 'firstName']),
+            self::pullClientField($params, ['last_name', 'lastName']),
+            self::pullClientField($params, ['city']),
+            self::pullClientField($params, ['state', 'province', 'region']),
+            self::pullClientField($params, ['zip', 'zipCode', 'postal_code', 'postalCode']),
+            self::pullClientField($params, ['country'])
+        );
 
         if (isset($params['discount_amount']) && isset($params['discount_currency'])) {
             $event->setDiscountAmount(new Money($params['discount_amount'], $params['discount_currency']));

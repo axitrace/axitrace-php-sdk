@@ -337,6 +337,41 @@ class TransactionEventTest extends TestCase
         $this->assertArrayNotHasKey('params', $array);
     }
 
+    public function testSetClientAddressPopulatesClientMatchKeys(): void
+    {
+        $event = $this->createValidEvent();
+        $event->setClientAddress('Ada', 'Lovelace', 'Zurich', 'ZH', '8001', 'CH');
+
+        $client = $event->toArray()['client'];
+
+        $this->assertEquals('Ada', $client['firstName']);
+        $this->assertEquals('Lovelace', $client['lastName']);
+        $this->assertEquals('Zurich', $client['city']);
+        $this->assertEquals('ZH', $client['state']);
+        $this->assertEquals('8001', $client['zip']);
+        $this->assertEquals('CH', $client['country']);
+    }
+
+    /**
+     * A half-filled checkout form must not produce blank match keys: an empty string still
+     * reads as "present" downstream and would shadow a value the event worker could
+     * otherwise supply from the visitor's profile.
+     */
+    public function testSetClientAddressSkipsEmptyAndWhitespaceValues(): void
+    {
+        $event = $this->createValidEvent();
+        $event->setClientAddress('  Ada  ', null, '   ', '', null, 'CH');
+
+        $client = $event->toArray()['client'];
+
+        $this->assertEquals('Ada', $client['firstName']);
+        $this->assertEquals('CH', $client['country']);
+        $this->assertArrayNotHasKey('lastName', $client);
+        $this->assertArrayNotHasKey('city', $client);
+        $this->assertArrayNotHasKey('state', $client);
+        $this->assertArrayNotHasKey('zip', $client);
+    }
+
     private function createValidEvent(): TransactionEvent
     {
         $event = TransactionEvent::create('ORDER-123', 99.99, 89.99, 'USD', 'CARD');

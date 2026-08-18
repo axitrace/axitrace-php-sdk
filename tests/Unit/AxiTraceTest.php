@@ -91,6 +91,106 @@ class AxiTraceTest extends TestCase
         $this->assertArrayNotHasKey('eventSalt', $this->lastRequestBody());
     }
 
+    /**
+     * The buyer's name and postal address must reach the API on the transaction's client
+     * object — that is the only shape the ingestion API maps onto Meta CAPI fn/ln/ct/st/zp/
+     * country and TikTok first_name/last_name/city/state/zip_code/country. Left inside the
+     * generic params bag they are silently dropped, which is exactly how server-side
+     * Purchase events ended up with 0% address coverage in production.
+     */
+    public function testTransactionPromotesBuyerAddressOntoClientObject(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ], [
+            'email' => 'buyer@example.com',
+            'phone' => '+41791234567',
+            'first_name' => 'Ada',
+            'last_name' => 'Lovelace',
+            'city' => 'Zurich',
+            'state' => 'ZH',
+            'zip' => '8001',
+            'country' => 'CH',
+        ]);
+
+        $body = $this->lastRequestBody();
+
+        $this->assertSame('buyer@example.com', $body['client']['email']);
+        $this->assertSame('+41791234567', $body['client']['phone']);
+        $this->assertSame('Ada', $body['client']['firstName']);
+        $this->assertSame('Lovelace', $body['client']['lastName']);
+        $this->assertSame('Zurich', $body['client']['city']);
+        $this->assertSame('ZH', $body['client']['state']);
+        $this->assertSame('8001', $body['client']['zip']);
+        $this->assertSame('CH', $body['client']['country']);
+    }
+
+    public function testTransactionAcceptsCamelCaseAndPostalCodeAliases(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ], [
+            'firstName' => 'Ada',
+            'lastName' => 'Lovelace',
+            'postalCode' => '8001',
+            'province' => 'ZH',
+        ]);
+
+        $body = $this->lastRequestBody();
+
+        $this->assertSame('Ada', $body['client']['firstName']);
+        $this->assertSame('Lovelace', $body['client']['lastName']);
+        $this->assertSame('8001', $body['client']['zip']);
+        $this->assertSame('ZH', $body['client']['state']);
+    }
+
+    /**
+     * A consumed match key must be removed from the params bag, otherwise it is also
+     * forwarded as a generic event param where the ingestion API ignores it — duplicated
+     * PII on the wire for no matching benefit.
+     */
+    public function testTransactionDoesNotAlsoForwardAddressAsGenericParams(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ], [
+            'first_name' => 'Ada',
+            'postalCode' => '8001',
+            'utm_source' => 'facebook',
+        ]);
+
+        $params = $this->lastRequestBody()['params'] ?? [];
+
+        $this->assertArrayNotHasKey('first_name', $params);
+        $this->assertArrayNotHasKey('postalCode', $params);
+        $this->assertSame('facebook', $params['utm_source']);
+    }
+
+    public function testTransactionOmitsAddressKeysWhenNotProvided(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ]);
+
+        $client = $this->lastRequestBody()['client'];
+
+        foreach (['firstName', 'lastName', 'city', 'state', 'zip', 'country'] as $key) {
+            $this->assertArrayNotHasKey($key, $client);
+        }
+    }
+
     public function testWithContextAppliesAllFourSetters(): void
     {
         $axiTrace = $this->createAxiTrace();

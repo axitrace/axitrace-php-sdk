@@ -208,6 +208,69 @@ class TransactionEvent extends AbstractEvent
     }
 
     /**
+     * Set the buyer's name and postal address on the client identity.
+     *
+     * These are match keys, not decoration: Meta CAPI hashes them into fn/ln/ct/st/zp/country
+     * and TikTok into first_name/last_name/city/state/zip_code/country. Pass plain text —
+     * hashing happens server-side. Empty and whitespace-only values are ignored so a partly
+     * filled checkout form never sends blank match keys.
+     *
+     * @param string|null $firstName
+     * @param string|null $lastName
+     * @param string|null $city
+     * @param string|null $state State, province or region
+     * @param string|null $zip
+     * @param string|null $country ISO 3166-1 alpha-2 preferred (e.g. "CH")
+     * @return self
+     */
+    public function setClientAddress(
+        ?string $firstName = null,
+        ?string $lastName = null,
+        ?string $city = null,
+        ?string $state = null,
+        ?string $zip = null,
+        ?string $country = null
+    ): self {
+        if (($value = self::cleanClientField($firstName)) !== null) {
+            $this->client->setFirstName($value);
+        }
+        if (($value = self::cleanClientField($lastName)) !== null) {
+            $this->client->setLastName($value);
+        }
+        if (($value = self::cleanClientField($city)) !== null) {
+            $this->client->setCity($value);
+        }
+        if (($value = self::cleanClientField($state)) !== null) {
+            $this->client->setState($value);
+        }
+        if (($value = self::cleanClientField($zip)) !== null) {
+            $this->client->setZip($value);
+        }
+        if (($value = self::cleanClientField($country)) !== null) {
+            $this->client->setCountry($value);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Trim a client match key, returning null for anything that carries no signal.
+     *
+     * @param string|null $value
+     * @return string|null
+     */
+    private static function cleanClientField(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    /**
      * Add a product to the transaction.
      *
      * Accepts either an AxiTrace\Model\Product instance or a plain array. The entry is

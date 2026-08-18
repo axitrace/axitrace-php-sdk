@@ -268,6 +268,32 @@ $axiTrace->transaction(
 );
 ```
 
+#### Buyer match keys (Event Match Quality)
+
+If your shop holds the buyer's billing or shipping details, pass them - this is the single
+largest available improvement to Purchase Event Match Quality:
+
+```php
+$axiTrace->transaction($orderId, 299.99, 279.99, 'USD', 'CARD', $products, [
+    'email'      => 'customer@example.com',
+    'phone'      => '+41791234567',
+    'first_name' => 'Ada',
+    'last_name'  => 'Lovelace',
+    'city'       => 'Zurich',
+    'state'      => 'ZH',      // state, province or region
+    'zip'        => '8001',
+    'country'    => 'CH',      // ISO 3166-1 alpha-2 preferred
+    'event_salt' => $orderId,
+]);
+```
+
+Pass **plain text** - hashing happens server-side (Meta CAPI `fn`/`ln`/`ct`/`st`/`zp`/
+`country`, TikTok `first_name`/`last_name`/`city`/`state`/`zip_code`/`country`). camelCase
+spellings are accepted too (`firstName`, `lastName`, `postalCode`, `zipCode`, `province`).
+Empty and whitespace-only values are dropped rather than sent as blank match keys.
+
+Requires SDK 1.5.0 or newer; older versions silently ignored everything except `email`.
+
 #### Products and eventSalt
 
 Two things caused the most support time for real integrations, so the SDK now guards
