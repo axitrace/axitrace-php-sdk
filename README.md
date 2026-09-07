@@ -619,5 +619,5 @@ MIT License. See LICENSE file for details.
 
 ## Support
 
-- Documentation: https://stat.axitrace.com/docs
+- Documentation: https://axitrace.com/docs
 - Issues: https://github.com/axitrace/axitrace-php-sdk/issues

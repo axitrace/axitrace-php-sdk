@@ -19,8 +19,8 @@
     ],
     "homepage": "https://axitrace.com",
     "support": {
-        "docs": "https://stat.axitrace.com/docs",
-        "issues": "https://github.com/axitrace/php-sdk/issues"
+        "docs": "https://axitrace.com/docs",
+        "issues": "https://github.com/axitrace/axitrace-php-sdk/issues"
     },
     "require": {
         "php": "^7.4 || ^8.0 || ^8.1 || ^8.2 || ^8.3",
