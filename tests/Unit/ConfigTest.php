@@ -89,6 +89,15 @@ class ConfigTest extends TestCase
         $this->assertTrue($config->isDebug());
     }
 
+    /**
+     * The version is the only marker the API has to tell which SDK build sent an event,
+     * so a release that forgets to bump it makes every field report look like the old one.
+     */
+    public function testSdkVersion(): void
+    {
+        $this->assertSame('1.6.0', Config::SDK_VERSION);
+    }
+
     public function testUserAgent(): void
     {
         $config = new Config('sk_test_key');

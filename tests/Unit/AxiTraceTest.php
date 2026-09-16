@@ -6,6 +6,7 @@ namespace AxiTrace\Tests\Unit;
 
 use AxiTrace\AxiTrace;
 use AxiTrace\Config;
+use AxiTrace\Exception\ValidationException;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -93,7 +94,7 @@ class AxiTraceTest extends TestCase
 
     /**
      * The buyer's name and postal address must reach the API on the transaction's client
-     * object — that is the only shape the ingestion API maps onto Meta CAPI fn/ln/ct/st/zp/
+     * object - that is the only shape the ingestion API maps onto Meta CAPI fn/ln/ct/st/zp/
      * country and TikTok first_name/last_name/city/state/zip_code/country. Left inside the
      * generic params bag they are silently dropped, which is exactly how server-side
      * Purchase events ended up with 0% address coverage in production.
@@ -152,7 +153,7 @@ class AxiTraceTest extends TestCase
 
     /**
      * A consumed match key must be removed from the params bag, otherwise it is also
-     * forwarded as a generic event param where the ingestion API ignores it — duplicated
+     * forwarded as a generic event param where the ingestion API ignores it - duplicated
      * PII on the wire for no matching benefit.
      */
     public function testTransactionDoesNotAlsoForwardAddressAsGenericParams(): void
@@ -226,5 +227,128 @@ class AxiTraceTest extends TestCase
 
         $this->assertNull($axiTrace->getVisitorId());
         $this->assertNull($axiTrace->getSessionId());
+    }
+
+    /**
+     * The consent state must reach the API as params.consent on the transaction payload.
+     * That single key is what the ingestion API keeps on the queued event and what the
+     * event worker reads to decide whether a purchase may be forwarded to an ad
+     * platform: a refusal that never leaves the SDK is a refusal nobody honours.
+     */
+    public function testWithContextConsentTravelsInTransactionParams(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->withContext(['consent' => 'denied'])->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ]);
+
+        $body = $this->lastRequestBody();
+        $this->assertSame('denied', $body['params']['consent']);
+    }
+
+    public function testWithContextConsentTravelsInPageViewParams(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->withContext(['consent' => 'granted'])->pageView('https://example.com/product');
+
+        $body = $this->lastRequestBody();
+        $this->assertSame('granted', $body['params']['consent']);
+    }
+
+    public function testWithContextConsentAppliesToEveryLaterEvent(): void
+    {
+        $axiTrace = $this->createAxiTrace(2);
+        $axiTrace->setClientId('visitor-123');
+        $axiTrace->withContext(['consent' => 'unknown']);
+
+        $axiTrace->pageView('https://example.com/first');
+        $this->assertSame('unknown', $this->lastRequestBody()['params']['consent']);
+
+        $axiTrace->pageView('https://example.com/second');
+        $this->assertSame('unknown', $this->lastRequestBody()['params']['consent']);
+    }
+
+    public function testWithContextConsentOverridesAConflictingEventParam(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->withContext(['consent' => 'denied'])
+            ->pageView('https://example.com/product', ['consent' => 'granted']);
+
+        $this->assertSame('denied', $this->lastRequestBody()['params']['consent']);
+    }
+
+    /**
+     * Without a consent key nothing changes: the payload carries no params.consent, which
+     * is how every integration that does not report consent keeps behaving today.
+     */
+    public function testWithoutConsentContextNoConsentParamIsSent(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->withContext(['clientId' => 'visitor-123'])->pageView('https://example.com/product');
+
+        $this->assertArrayNotHasKey('consent', $this->lastRequestBody()['params']);
+    }
+
+    /**
+     * @dataProvider invalidConsentValuesProvider
+     * @param mixed $consent
+     */
+    public function testWithContextRejectsAnInvalidConsentValue($consent): void
+    {
+        $axiTrace = $this->createAxiTrace(0);
+
+        $this->expectException(ValidationException::class);
+
+        $axiTrace->withContext(['consent' => $consent]);
+    }
+
+    /**
+     * @return array<string, array<int, mixed>>
+     */
+    public function invalidConsentValuesProvider(): array
+    {
+        return [
+            'unsupported word' => ['accepted'],
+            'wrong case' => ['GRANTED'],
+            'empty string' => [''],
+            'boolean' => [true],
+            'integer' => [1],
+            'array' => [['granted']],
+        ];
+    }
+
+    /**
+     * A rejected consent value must not leave the instance half-configured: the caller
+     * catches the exception and retries, and a client ID applied by the failed call
+     * would then silently belong to the wrong visitor.
+     */
+    public function testRejectedConsentLeavesTheContextUnapplied(): void
+    {
+        $axiTrace = $this->createAxiTrace(0);
+
+        try {
+            $axiTrace->withContext(['clientId' => 'ctx-client', 'consent' => 'accepted']);
+            $this->fail('withContext() must reject an invalid consent state');
+        } catch (ValidationException $e) {
+            $this->assertNull($axiTrace->getVisitorId());
+        }
+    }
+
+    public function testWithContextConsentNullIsTreatedAsNotReported(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->withContext(['consent' => null])->pageView('https://example.com/product');
+
+        $this->assertArrayNotHasKey('consent', $this->lastRequestBody()['params']);
     }
 }

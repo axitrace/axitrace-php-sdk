@@ -24,7 +24,7 @@ class Config
     /**
      * SDK version.
      */
-    public const SDK_VERSION = '1.5.1';
+    public const SDK_VERSION = '1.6.0';
 
     /**
      * @var string

@@ -103,6 +103,15 @@ class AxiTrace
         '_ttp',  // TikTok Browser ID
         '_ga',   // Google Analytics Client ID
     ];
+
+    /**
+     * Visitor consent states AxiTrace understands, shared by every surface of the
+     * product (JavaScript SDK, plugins, Shopify pixel, ingestion API, event worker).
+     * Any other value is rejected by withContext() so that an unrecognised state never
+     * reaches the server, where the forwarding gate would have to guess what it means.
+     */
+    public const CONSENT_STATES = ['granted', 'denied', 'unknown'];
+
     /**
      * @var Config
      */
@@ -168,6 +177,15 @@ class AxiTrace
      * @var array<string, string>
      */
     private array $attributionParams = [];
+
+    /**
+     * Visitor consent state reported by the integration, applied to every event sent
+     * after withContext(). Null means the integration does not report consent, which
+     * the server treats as an unknown state.
+     *
+     * @var string|null
+     */
+    private ?string $consent = null;
 
     /**
      * @param Config $config
@@ -335,7 +353,15 @@ class AxiTrace
      *   - 'sessionId': the session ID normally read from the vt_sid cookie
      *   - 'ip': the end-user's IP address (NOT your server's IP)
      *   - 'userAgent': the end-user's browser user agent (NOT a server-side default)
+     *   - 'consent': the visitor's marketing consent state, one of 'granted', 'denied'
+     *     or 'unknown'. It travels as params.consent on every event sent afterwards.
+     *     Pass 'denied' for a visitor who refused marketing cookies: the purchase is
+     *     still recorded in your AxiTrace reports, but it is stripped of ad identifiers
+     *     and never forwarded to an ad platform. Omit the key when your integration
+     *     cannot tell, which the server treats as an unknown state.
      * @return self
+     * @throws ValidationException If 'consent' is present but is not one of the three
+     *     states AxiTrace understands.
      *
      * @example
      * // Inside a queue job processing a payment webhook, using visitor data captured
@@ -349,6 +375,13 @@ class AxiTrace
      */
     public function withContext(array $context): self
     {
+        // Validated first so an invalid consent value leaves the instance untouched
+        // rather than half-applied.
+        $consent = null;
+        if (array_key_exists('consent', $context) && $context['consent'] !== null) {
+            $consent = self::normalizeConsent($context['consent']);
+        }
+
         $clientId = $context['clientId'] ?? $context['customId'] ?? null;
         if (is_string($clientId) && $clientId !== '') {
             $this->setClientId($clientId);
@@ -366,7 +399,40 @@ class AxiTrace
             $this->setClientUserAgent($context['userAgent']);
         }
 
+        if ($consent !== null) {
+            $this->consent = $consent;
+        }
+
         return $this;
+    }
+
+    /**
+     * Validate a consent value coming from an integration.
+     *
+     * A typo or a made-up state must fail loudly here rather than travel to the server,
+     * where it would be dropped without a word and the merchant would never learn that
+     * their consent signal is not reaching AxiTrace.
+     *
+     * @param mixed $consent
+     * @return string
+     * @throws ValidationException
+     */
+    private static function normalizeConsent($consent): string
+    {
+        if (is_string($consent) && in_array($consent, self::CONSENT_STATES, true)) {
+            return $consent;
+        }
+
+        throw new ValidationException(
+            sprintf(
+                'Invalid consent state %s. Use one of: %s.',
+                is_string($consent) ? sprintf('"%s"', $consent) : gettype($consent),
+                implode(', ', self::CONSENT_STATES)
+            ),
+            400,
+            null,
+            ['field' => 'consent']
+        );
     }
 
     /**
@@ -1048,7 +1114,7 @@ class AxiTrace
 
         // Promote Facebook identifiers to the dedicated TransactionEvent fields.
         // The ingestion API maps only the root-level fbp/fbc keys of the
-        // transaction payload to Facebook CAPI matching — values left inside the
+        // transaction payload to Facebook CAPI matching - values left inside the
         // generic params object are not read for these fields. Explicit values
         // passed via $params win; cookie auto-read acts as a fallback.
         $fbp = isset($params['fbp']) && is_string($params['fbp']) && $this->isValidFacebookCookie($params['fbp'])
@@ -1082,6 +1148,8 @@ class AxiTrace
         if ($this->pageUrl !== null && method_exists($event, 'setUrl')) {
             $event->setUrl($this->pageUrl);
         }
+
+        $this->applyConsent($event);
 
         // Sync client data and send event
         $this->syncClientDataToHttpClient();
@@ -1249,6 +1317,8 @@ class AxiTrace
             $event->setUrl($this->pageUrl);
         }
 
+        $this->applyConsent($event);
+
         // Sync client data and send
         $this->syncClientDataToHttpClient();
 
@@ -1410,5 +1480,28 @@ class AxiTrace
             $mergedParams = array_merge($this->attributionParams, $existingParams);
             $event->setParams($mergedParams);
         }
+
+        $this->applyConsent($event);
+    }
+
+    /**
+     * Stamp the consent state supplied through withContext() onto an event.
+     *
+     * It rides in params.consent, the single key every AxiTrace surface reads: the
+     * ingestion API keeps it on the queued event and the event worker decides from it
+     * whether the conversion may be forwarded to an ad platform. The context value is
+     * authoritative, so it is applied last and overwrites anything a caller put in the
+     * event params.
+     *
+     * @param EventInterface $event
+     * @return void
+     */
+    private function applyConsent(EventInterface $event): void
+    {
+        if ($this->consent === null || !method_exists($event, 'addParam')) {
+            return;
+        }
+
+        $event->addParam('consent', $this->consent);
     }
 }

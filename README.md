@@ -476,8 +476,46 @@ $axiTrace->withContext([
 ```
 
 `withContext()` accepts (all optional): `clientId` (or `customId` as an alias),
-`sessionId`, `ip`, `userAgent`. It applies the corresponding `set*()` calls and returns
-`$this` for chaining. See `examples/queue-transaction.php` for a full runnable example.
+`sessionId`, `ip`, `userAgent`, `consent`. It applies the corresponding `set*()` calls
+and returns `$this` for chaining. See `examples/queue-transaction.php` for a full
+runnable example.
+
+## Cookie consent
+
+If your site asks visitors for cookie consent, tell AxiTrace what they decided. Pass the
+state through `withContext()` and it travels as `params.consent` on every event you send
+afterwards:
+
+```php
+$axiTrace->withContext([
+    'clientId' => $order->getVisitorId(),
+    'consent' => $order->hasMarketingConsent() ? 'granted' : 'denied',
+])->transaction(/* ... */);
+```
+
+Accepted values, and nothing else:
+
+| Value | Meaning | What AxiTrace does |
+|-------|---------|--------------------|
+| `granted` | The visitor accepted marketing cookies. | The event is recorded and forwarded to your ad platforms. |
+| `denied` | The visitor refused marketing cookies. | The event is recorded in your AxiTrace reports, but it is stripped of ad identifiers and is never forwarded to an ad platform. |
+| `unknown` | You cannot tell (no banner, or the decision is not available here). | The event is recorded. Whether it is forwarded depends on the "Forward events that do not report a consent state" setting of your workspace. |
+
+Any other value throws `AxiTrace\Exception\ValidationException`:
+
+```php
+use AxiTrace\Exception\ValidationException;
+
+try {
+    $axiTrace->withContext(['consent' => 'accepted']); // not a valid state
+} catch (ValidationException $e) {
+    // Invalid consent state "accepted". Use one of: granted, denied, unknown.
+}
+```
+
+Omitting the `consent` key sends no `params.consent` at all, which the server reads as
+an unknown state. Consent is remembered on the SDK instance, so set it before the first
+event of the request and every later event carries it.
 
 ## Facebook Conversion API Integration
 
