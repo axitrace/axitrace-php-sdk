@@ -3,6 +3,20 @@
 All notable changes to the AxiTrace PHP SDK are documented in this file.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0]
+
+### Added
+
+- `AxiTrace\Model\Event\CustomEvent` sends a workspace-defined custom event to
+  `POST /v1/custom-events`. Define the event key first in the AxiTrace admin panel
+  (workspace Settings, Advanced, Custom Events); an undefined key is rejected.
+- Constructor: event key, properties, optional value, currency, transaction id and
+  event id. When no event id is passed, a UUID v4 is generated, so the request can be
+  retried safely: the endpoint deduplicates on `event_id` for 5 minutes.
+- `setClientId()` and `setSessionId()` link the event to the visitor (the `vt_vid` and
+  `vt_sid` cookie values).
+- Guide: https://axitrace.com/docs/events/custom-events
+
 ## [1.6.0]
 
 ### Added
