@@ -95,7 +95,7 @@ class ConfigTest extends TestCase
      */
     public function testSdkVersion(): void
     {
-        $this->assertSame('1.6.0', Config::SDK_VERSION);
+        $this->assertSame('1.7.0', Config::SDK_VERSION);
     }
 
     public function testUserAgent(): void
