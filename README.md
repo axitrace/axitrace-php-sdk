@@ -92,6 +92,40 @@ Keep your secret key secure and never expose it in client-side code.
 
 All events are sent using `$axiTrace->events()->send($event)`.
 
+### Custom Event
+
+Merchant-defined custom events go through a DEDICATED endpoint
+(`POST /v1/custom-events`) and require PRE-REGISTRATION: the event key must
+be defined in the workspace's Custom Events registry (AxiTrace admin panel,
+workspace Settings, Advanced) BEFORE it can be sent. An unknown name is
+rejected by the ingestion with HTTP 400 and the stable message prefix
+`unknown custom event: <name>`.
+
+The endpoint is the ONLY /v1 endpoint with event_id deduplication: sending
+the same event_id twice is answered `202 duplicate`, so the event is safe
+to retry. Pass your own `event_id` (any non-empty string, at most 100
+characters) to make retries idempotent.
+
+The key pattern is `[a-z][a-z0-9_]{0,39}` (lowercase letters, numbers and
+underscores, starting with a letter, GA4-compatible). Note that the
+`once_per_page_view` throttle behaves as unlimited for server callers; the
+server applies only `once_per_session` and `every_n_seconds`.
+
+```php
+use AxiTrace\Model\Event\CustomEvent;
+
+$event = new CustomEvent(
+    'quote_requested',            // the pre-registered key
+    ['menu_name' => 'Salad'],     // declared properties
+    149.50,                       // optional value (conversion kind only)
+    'PLN',                        // optional currency
+    'order-1001',                 // optional transaction id
+    'dedup-id-1'                  // caller-supplied event_id (safe to retry)
+);
+
+$axiTrace->events()->send($event);
+```
+
 ### Page View
 
 ```php
