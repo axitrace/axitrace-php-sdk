@@ -385,4 +385,24 @@ class TransactionEventTest extends TestCase
 
         return $event;
     }
+
+    public function testSetRecordedAtConvertsToUtcWithMilliseconds(): void
+    {
+        $event = TransactionEvent::create('ORDER-1', 10.0, 9.0, 'PLN', 'CARD');
+        $placed = new \DateTime('2026-09-17 14:05:07.123456', new \DateTimeZone('Europe/Warsaw'));
+
+        $event->setRecordedAt($placed);
+        $placed->modify('+1 day');
+
+        $this->assertSame('2026-09-17T12:05:07.123Z', $event->toArray()['recordedAt'], 'a later change to the caller\'s DateTime must not leak in');
+        $this->assertSame('UTC', $event->getRecordedAt()->getTimezone()->getName());
+    }
+
+    public function testRecordedAtIsOmittedUntilSet(): void
+    {
+        $event = TransactionEvent::create('ORDER-1', 10.0, 9.0, 'PLN', 'CARD');
+
+        $this->assertNull($event->getRecordedAt());
+        $this->assertArrayNotHasKey('recordedAt', $event->toArray());
+    }
 }

@@ -628,6 +628,39 @@ class AxiTrace
     }
 
     /**
+     * The 'recorded_at' transaction param as a date: a \\DateTimeInterface as is, or an
+     * ISO 8601 string. Anything else fails here, before any request, instead of being
+     * sent and silently replaced by the server's clock.
+     *
+     * @param mixed $value
+     * @return \DateTimeInterface
+     * @throws ValidationException
+     */
+    private static function toRecordedAt($value): \DateTimeInterface
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            try {
+                return new \DateTimeImmutable($value);
+            } catch (\Exception $e) {
+                // Reported below with the expected format.
+            }
+        }
+
+        throw new ValidationException(
+            sprintf(
+                'Invalid recorded_at: expected a DateTimeInterface or an ISO 8601 string '
+                . '(e.g. "2026-09-17T12:05:00+02:00"), got %s.',
+                is_string($value) ? json_encode($value) : gettype($value)
+            ),
+            400
+        );
+    }
+
+    /**
      * Read the first non-empty string among $keys out of $params and remove every alias
      * from the array, so a consumed match key is never also forwarded as a generic event
      * param (where the ingestion API would ignore it).
@@ -1011,7 +1044,10 @@ class AxiTrace
      *   'discount_amount' + 'discount_currency', 'metadata', 'fbp', 'fbc', and
      *   'event_salt'/'eventSalt' - set this to your orderId (or another value stable across
      *   retries) so a retried call does not create a duplicate transaction; /v1/transaction
-     *   performs NO server-side dedup, eventSalt is the only guard. Any remaining keys are
+     *   performs NO server-side dedup, eventSalt is the only guard.
+     *   'recorded_at'/'recordedAt' - when the order was placed, as a \\DateTimeInterface or an
+     *   ISO 8601 string; set it when sending later than the purchase (queue, cron re-drive,
+     *   backfill) so the order is dated correctly. Any remaining keys are
      *   forwarded as event params (e.g. attribution data). This parameter is fully
      *   backward-compatible: existing calls that omit it, or that don't set 'event_salt',
      *   behave exactly as before.
@@ -1067,6 +1103,13 @@ class AxiTrace
         unset($params['event_salt'], $params['eventSalt']);
         if ($eventSalt !== null && $eventSalt !== '') {
             $event->setEventSalt((string) $eventSalt);
+        }
+
+        // When the order was placed, for a transaction sent later than it happened.
+        $recordedAt = $params['recorded_at'] ?? $params['recordedAt'] ?? null;
+        unset($params['recorded_at'], $params['recordedAt']);
+        if ($recordedAt !== null && $recordedAt !== '') {
+            $event->setRecordedAt(self::toRecordedAt($recordedAt));
         }
 
         // Set client identity from cookies (CRITICAL: This links PHP SDK events to JS SDK profile)

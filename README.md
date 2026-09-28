@@ -505,9 +505,37 @@ $axiTrace->withContext([
     $order->getCurrency(),
     $order->getPaymentMethod(),
     $order->getProductsForTracking(),
-    ['event_salt' => $order->getId()] // webhooks retry - always set eventSalt here
+    [
+        'event_salt' => $order->getId(),          // webhooks retry - always set eventSalt here
+        'recorded_at' => $order->getCreatedAt(),  // when the order was placed, not when this job runs
+    ]
 );
 ```
+
+### Dating a late transaction: `recorded_at`
+
+A transaction sent later than the order was placed - from a queue that was backed up, a cron job
+that re-sends failed deliveries, a backfill - is dated at the moment it reaches AxiTrace unless
+you say otherwise, so it lands on the wrong day in reports and reaches the ad platforms as a
+fresh conversion. Pass the time the order was placed (SDK 1.8.0+):
+
+```php
+// Facade: a DateTimeInterface or an ISO 8601 string
+$axiTrace->transaction($orderId, 299.99, 279.99, 'USD', 'CARD', $products, [
+    'event_salt' => $orderId,
+    'recorded_at' => new DateTimeImmutable('2026-09-17 14:05:07', new DateTimeZone('Europe/Warsaw')),
+]);
+
+// Event model
+$event->setRecordedAt($order->getCreatedAt());
+```
+
+- It is sent as `recordedAt` in UTC with millisecond precision; a time in the future is replaced
+  by the server's clock. An unreadable string throws `ValidationException` before any request.
+- Meta accepts conversions up to 7 days old. An older order is still recorded in AxiTrace and
+  forwarded to platforms that accept older conversions (Google Ads: 90 days), but not to Meta.
+- Keep `event_salt` set to your order id: a re-sent order that already arrived within the last
+  30 days is then ignored instead of counted twice.
 
 `withContext()` accepts (all optional): `clientId` (or `customId` as an alias),
 `sessionId`, `ip`, `userAgent`, `consent`. It applies the corresponding `set*()` calls

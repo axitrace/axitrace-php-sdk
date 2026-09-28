@@ -3,6 +3,19 @@
 All notable changes to the AxiTrace PHP SDK are documented in this file.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0]
+
+### Added
+
+- `TransactionEvent::setRecordedAt(\DateTimeInterface)` and the `recorded_at` (or
+  `recordedAt`) key of `transaction()` params: the time the order was placed, sent as
+  `recordedAt` in UTC. Set it whenever a transaction is sent later than it happened (a
+  queue, a cron re-send of failed deliveries, a backfill); without it the order is dated
+  at the moment it reaches AxiTrace.
+- `transaction()` accepts a `DateTimeInterface` or an ISO 8601 string and throws
+  `ValidationException` for anything it cannot read, before sending.
+- Guide: https://axitrace.com/docs/troubleshooting/server-side-sending
+
 ## [1.7.0]
 
 ### Added

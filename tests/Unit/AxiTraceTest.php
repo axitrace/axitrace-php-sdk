@@ -80,6 +80,67 @@ class AxiTraceTest extends TestCase
         $this->assertSame('ORDER-123-camel', $this->lastRequestBody()['eventSalt']);
     }
 
+    public function testTransactionRecordedAtParamIsSentInUtc(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ], [
+            'recorded_at' => new \DateTimeImmutable('2026-09-17 14:05:07', new \DateTimeZone('Europe/Warsaw')),
+        ]);
+
+        $body = $this->lastRequestBody();
+        $this->assertSame('2026-09-17T12:05:07.000Z', $body['recordedAt']);
+        $this->assertArrayNotHasKey('recorded_at', $body['params'] ?? [], 'a consumed key is not also a generic param');
+    }
+
+    public function testTransactionAcceptsAnIsoStringForRecordedAt(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ], [
+            'recordedAt' => '2026-09-22T17:05:00+02:00',
+        ]);
+
+        $this->assertSame('2026-09-22T15:05:00.000Z', $this->lastRequestBody()['recordedAt']);
+    }
+
+    public function testTransactionRejectsAnUnreadableRecordedAtBeforeSending(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        try {
+            $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+                ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+            ], [
+                'recorded_at' => 'yesterday-ish',
+            ]);
+            $this->fail('an unreadable recorded_at must fail locally');
+        } catch (\AxiTrace\Exception\ValidationException $e) {
+            $this->assertStringContainsString('recorded_at', $e->getMessage());
+        }
+
+        $this->assertCount(0, $this->requestHistory, 'nothing may be sent');
+    }
+
+    public function testTransactionWithoutRecordedAtOmitsItFromPayload(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->setClientId('visitor-123');
+
+        $axiTrace->transaction('ORDER-123', 10.0, 10.0, 'USD', 'CARD', [
+            ['sku' => 'SKU-1', 'name' => 'Product 1', 'finalUnitPrice' => 10.0, 'quantity' => 1],
+        ]);
+
+        $this->assertArrayNotHasKey('recordedAt', $this->lastRequestBody());
+    }
+
     public function testTransactionWithoutEventSaltOmitsItFromPayload(): void
     {
         $axiTrace = $this->createAxiTrace();

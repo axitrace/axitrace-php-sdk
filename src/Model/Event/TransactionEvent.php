@@ -92,6 +92,12 @@ class TransactionEvent extends AbstractEvent
     private ?string $url = null;
 
     /**
+     * When the order was placed, if it is sent later (from a queue, a cron re-drive or a
+     * backfill). Null means "now": the API stamps the transaction with its receive time.
+     */
+    private ?\DateTimeImmutable $recordedAt = null;
+
+    /**
      * @param string $orderId
      * @param string $source
      * @param Money $revenue
@@ -501,6 +507,39 @@ class TransactionEvent extends AbstractEvent
     }
 
     /**
+     * Set when the order was actually placed.
+     *
+     * Use it whenever the transaction is sent later than it happened - from a queue, a
+     * cron job that re-sends failed deliveries, or a backfill. Without it AxiTrace dates
+     * the order at the moment the request arrives, so a purchase re-sent three days late
+     * lands on the wrong day in reports and reaches the ad platforms as a new conversion.
+     *
+     * The time is sent in UTC with millisecond precision. A time in the future is
+     * replaced by the server's clock. Meta accepts conversions up to 7 days old; an older
+     * transaction is still recorded in AxiTrace and forwarded to platforms with longer
+     * windows (Google Ads accepts 90 days).
+     *
+     * @param \DateTimeInterface $recordedAt
+     * @return self
+     */
+    public function setRecordedAt(\DateTimeInterface $recordedAt): self
+    {
+        $this->recordedAt = (new \DateTimeImmutable('@' . $recordedAt->format('U.u')))
+            ->setTimezone(new \DateTimeZone('UTC'));
+        return $this;
+    }
+
+    /**
+     * When the order was placed, in UTC, or null when the API should use its receive time.
+     *
+     * @return \DateTimeImmutable|null
+     */
+    public function getRecordedAt(): ?\DateTimeImmutable
+    {
+        return $this->recordedAt;
+    }
+
+    /**
      * Get page URL.
      *
      * @return string|null
@@ -636,6 +675,10 @@ class TransactionEvent extends AbstractEvent
 
         if ($this->eventSalt !== null) {
             $data['eventSalt'] = $this->eventSalt;
+        }
+
+        if ($this->recordedAt !== null) {
+            $data['recordedAt'] = $this->recordedAt->format('Y-m-d\\TH:i:s.v\\Z');
         }
 
         // Include additional params (attribution data like fbclid, utm_source, etc.)
