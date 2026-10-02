@@ -80,6 +80,22 @@ class Product
     private ?int $stockQuantity = null;
 
     /**
+     * What one unit cost the merchant (profit tracking), in the transaction currency.
+     * Sent only inside a TransactionEvent, never with cart or catalog events.
+     *
+     * @var float|null
+     */
+    private ?float $unitCost = null;
+
+    /**
+     * The product's id in the store platform (e.g. "woocommerce:1234"), used to match
+     * the line to the cost catalog. Sent only inside a TransactionEvent.
+     *
+     * @var string|null
+     */
+    private ?string $externalId = null;
+
+    /**
      * @var array<string, mixed>
      */
     private array $customAttributes = [];
@@ -155,11 +171,23 @@ class Product
             $product->setStockQuantity((int) ($data['stock_quantity'] ?? $data['stockQuantity']));
         }
 
+        if (isset($data['unit_cost']) || isset($data['unitCost'])) {
+            $product->setUnitCost((float) ($data['unit_cost'] ?? $data['unitCost']));
+        }
+
+        if (isset($data['external_id']) || isset($data['externalId'])) {
+            $product->setExternalId((string) ($data['external_id'] ?? $data['externalId']));
+        }
+
         return $product;
     }
 
     /**
      * Convert product to array for API.
+     *
+     * unitCost and externalId are deliberately left out: this shape is used by cart and
+     * catalog events, and a unit cost must only travel with a server-side transaction.
+     * TransactionEvent reads them through getUnitCost() and getExternalId().
      *
      * @return array<string, mixed>
      */
@@ -362,6 +390,30 @@ class Product
     }
 
     /**
+     * Set what one unit cost you, in the transaction currency (profit tracking).
+     *
+     * @param float $unitCost
+     * @return self
+     */
+    public function setUnitCost(float $unitCost): self
+    {
+        $this->unitCost = $unitCost;
+        return $this;
+    }
+
+    /**
+     * Set the product's id in your store platform, used to match the cost catalog.
+     *
+     * @param string $externalId
+     * @return self
+     */
+    public function setExternalId(string $externalId): self
+    {
+        $this->externalId = $externalId;
+        return $this;
+    }
+
+    /**
      * Set a custom attribute.
      *
      * @param string $key
@@ -438,5 +490,21 @@ class Product
     public function getSku(): ?string
     {
         return $this->sku;
+    }
+
+    /**
+     * @return float|null
+     */
+    public function getUnitCost(): ?float
+    {
+        return $this->unitCost;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getExternalId(): ?string
+    {
+        return $this->externalId;
     }
 }

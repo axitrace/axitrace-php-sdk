@@ -3,6 +3,29 @@
 All notable changes to the AxiTrace PHP SDK are documented in this file.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0]
+
+### Added
+
+- Profit tracking cost fields on `TransactionEvent`: `setTax()`, `setShipping()` (shipping the
+  buyer paid, tax included), `setTaxesIncluded()` and `setCosts($shipping, $paymentFee,
+  $handling)` for what the order cost you. They are sent as `tax`, `shipping`, `taxesIncluded`
+  and `costs` on `/v1/transaction`.
+- Per product: `unitCost` (what one unit cost you) and `externalId` (the product id in your store
+  platform), as array keys or through `Product::setUnitCost()` and `Product::setExternalId()`.
+- Costs in another currency than the revenue, or below 0, throw `ValidationException` before
+  sending.
+- `AxiTrace::refund()` and `AxiTrace\Model\Event\RefundEvent` send a refund or a cancellation to
+  `POST /v1/refund` (secret key only): order id, refund id, time, amount, currency, cancellation
+  flag and refunded lines. A refund reduces profit and POAS; ROAS is not changed.
+- Guide: README section "Profit tracking: cost fields and refunds".
+
+### Notes
+
+- A transaction that uses none of the new setters is sent exactly as in 1.8.0.
+- `Product::toArray()`, used by cart and catalog events, never includes `unitCost` or
+  `externalId`.
+
 ## [1.8.0]
 
 ### Added

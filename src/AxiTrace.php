@@ -21,6 +21,7 @@ use AxiTrace\Model\Event\EventInterface;
 use AxiTrace\Model\Event\FormSubmitEvent;
 use AxiTrace\Model\Event\PageViewEvent;
 use AxiTrace\Model\Event\ProductViewEvent;
+use AxiTrace\Model\Event\RefundEvent;
 use AxiTrace\Model\Event\RemoveFromCartEvent;
 use AxiTrace\Model\Event\SearchEvent;
 use AxiTrace\Model\Event\SelectItemEvent;
@@ -638,6 +639,19 @@ class AxiTrace
      */
     private static function toRecordedAt($value): \DateTimeInterface
     {
+        return self::toDateTime($value, 'recorded_at');
+    }
+
+    /**
+     * A date param: a \\DateTimeInterface as is, or an ISO 8601 string.
+     *
+     * @param mixed $value
+     * @param string $field Param name used in the error message
+     * @return \DateTimeInterface
+     * @throws ValidationException
+     */
+    private static function toDateTime($value, string $field): \DateTimeInterface
+    {
         if ($value instanceof \DateTimeInterface) {
             return $value;
         }
@@ -652,8 +666,9 @@ class AxiTrace
 
         throw new ValidationException(
             sprintf(
-                'Invalid recorded_at: expected a DateTimeInterface or an ISO 8601 string '
+                'Invalid %s: expected a DateTimeInterface or an ISO 8601 string '
                 . '(e.g. "2026-09-17T12:05:00+02:00"), got %s.',
+                $field,
                 is_string($value) ? json_encode($value) : gettype($value)
             ),
             400
@@ -1196,6 +1211,63 @@ class AxiTrace
 
         // Sync client data and send event
         $this->syncClientDataToHttpClient();
+
+        return $this->eventsApi->send($event);
+    }
+
+    /**
+     * Send a refund or cancellation of an order sent earlier with transaction().
+     *
+     * Posts to /v1/refund with the secret key. A refund reduces the order's profit and
+     * POAS in AxiTrace; revenue and ROAS reports are not changed. The endpoint
+     * deduplicates on $refundId, so retrying with the same id records the refund once.
+     *
+     * @param string $orderId The orderId the transaction was sent with
+     * @param string $refundId Your id of this refund (e.g. the credit memo number)
+     * @param float $amount The total refunded to the buyer
+     * @param string $currency ISO 4217 code of the original transaction
+     * @param array<int, array<string, mixed>> $lines Refunded lines, each with "sku" and/or
+     *   "externalId", "quantity" and "amount"; empty for a refund that returns no products
+     * @param array<string, mixed> $params Recognized keys (all optional):
+     *   'refunded_at'/'refundedAt' - a \DateTimeInterface or an ISO 8601 string (default now);
+     *   'is_cancellation'/'isCancellation' - true when the order was cancelled.
+     *   Any other key throws ValidationException: a refund carries no free-form params.
+     * @return Response
+     * @throws ValidationException
+     * @throws ApiException
+     * @throws AuthenticationException
+     */
+    public function refund(
+        string $orderId,
+        string $refundId,
+        float $amount,
+        string $currency,
+        array $lines = [],
+        array $params = []
+    ): Response {
+        $refundedAt = $params['refunded_at'] ?? $params['refundedAt'] ?? null;
+        $isCancellation = $params['is_cancellation'] ?? $params['isCancellation'] ?? false;
+        unset($params['refunded_at'], $params['refundedAt'], $params['is_cancellation'], $params['isCancellation']);
+
+        if ($params !== []) {
+            throw new ValidationException(
+                sprintf(
+                    'Unknown refund params: %s. Accepted: refunded_at, is_cancellation.',
+                    implode(', ', array_map('strval', array_keys($params)))
+                ),
+                400
+            );
+        }
+
+        $event = new RefundEvent(
+            $orderId,
+            $refundId,
+            $amount,
+            $currency,
+            $refundedAt !== null && $refundedAt !== '' ? self::toDateTime($refundedAt, 'refunded_at') : null
+        );
+        $event->setCancellation((bool) $isCancellation);
+        $event->setLines($lines);
 
         return $this->eventsApi->send($event);
     }

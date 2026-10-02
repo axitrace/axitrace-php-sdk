@@ -542,6 +542,82 @@ $event->setRecordedAt($order->getCreatedAt());
 and returns `$this` for chaining. See `examples/queue-transaction.php` for a full
 runnable example.
 
+## Profit tracking: cost fields and refunds
+
+When profit tracking is enabled for your workspace, AxiTrace computes the profit of every order
+and reports POAS (profit on ad spend) next to ROAS. Send what each order cost you and AxiTrace
+uses it instead of the cost rules set in the admin panel (SDK 1.9.0+). Every field is optional:
+a transaction without them is sent exactly as before.
+
+```php
+use AxiTrace\Model\Event\TransactionEvent;
+use AxiTrace\Model\Money;
+use AxiTrace\Model\Product;
+
+$event = TransactionEvent::create($orderId, 299.99, 279.99, 'EUR', 'CARD');
+$event->setClientCustomId($axiTrace->getVisitorId() ?? $order->getCustomerId())
+      ->setEventSalt($orderId)
+      ->setTax(52.31)              // total tax of the order
+      ->setShipping(9.99)          // shipping the buyer paid, tax included
+      ->setTaxesIncluded(true)     // revenue and prices include tax
+      // What the order cost you: shipping, payment fee, handling. A number is read in the
+      // revenue currency; pass null for a cost you do not know and the workspace rule applies.
+      ->setCosts(6.40, new Money(4.12, 'EUR'), null)
+      ->setProducts([
+          [
+              'sku' => 'SKU-001',
+              'name' => 'Office chair',
+              'finalUnitPrice' => 149.99,
+              'quantity' => 2,
+              'unitCost' => 71.50,                 // what one unit cost you
+              'externalId' => 'woocommerce:1234',  // the product id in your store platform
+          ],
+      ]);
+
+// Or with the Product model
+$event->addProduct(
+    (new Product('ITEM-2'))->setSku('SKU-002')->setItemName('Desk mat')
+        ->setPrice(19.99)->setQuantity(1)->setUnitCost(6.20)->setExternalId('woocommerce:88')
+);
+
+$axiTrace->track($event);
+```
+
+- Costs must be in the revenue currency and at least 0; anything else throws
+  `ValidationException` before any request is made.
+- Costs are accepted only with your secret key, which this SDK always uses. Never send them from
+  a browser: AxiTrace drops cost fields that arrive without the secret key.
+- `unitCost` and `externalId` travel only with a transaction. `Product::toArray()`, used by cart
+  and catalog events, never includes them.
+
+### Refunds and cancellations
+
+Send a refund or a cancellation of an order you sent before. It reduces that order's profit and
+POAS; revenue and ROAS reports do not change.
+
+```php
+$axiTrace->refund(
+    $orderId,                // the orderId the transaction was sent with
+    $creditMemo->getId(),    // your refund id: a retry with the same id is recorded once
+    59.98,                   // total refunded to the buyer
+    'EUR',                   // currency of the original transaction
+    [
+        // Refunded lines: identify each product by sku, externalId or both
+        ['sku' => 'SKU-001', 'externalId' => 'woocommerce:1234', 'quantity' => 1, 'amount' => 49.99],
+        ['sku' => 'SKU-002', 'quantity' => 1, 'amount' => 9.99],
+    ],
+    [
+        'refunded_at' => $creditMemo->getCreatedAt(),  // DateTimeInterface or ISO 8601; default now
+        'is_cancellation' => false,                    // true when the whole order was cancelled
+    ]
+);
+```
+
+Leave the lines out for a refund that returns no products, such as a goodwill or shipping refund.
+The same request can be built with `AxiTrace\Model\Event\RefundEvent` (`addLine()`,
+`setCancellation()`, `setRefundedAt()`) and sent with `$axiTrace->track($event)`. Refunds go to
+`POST /v1/refund`, which accepts only the secret key.
+
 ## Cookie consent
 
 If your site asks visitors for cookie consent, tell AxiTrace what they decided. Pass the

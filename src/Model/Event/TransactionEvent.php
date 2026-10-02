@@ -98,6 +98,29 @@ class TransactionEvent extends AbstractEvent
     private ?\DateTimeImmutable $recordedAt = null;
 
     /**
+     * Total tax of the order, a plain number in the revenue currency. Null: not sent.
+     */
+    private ?float $tax = null;
+
+    /**
+     * Shipping charged to the buyer, gross of tax, in the revenue currency. Null: not sent.
+     */
+    private ?float $shipping = null;
+
+    /**
+     * Whether the revenue and product prices include tax. Null: not sent.
+     */
+    private ?bool $taxesIncluded = null;
+
+    /**
+     * Order-level costs the merchant pays (profit tracking), keyed by the API field name
+     * (shipping, paymentFee, handling). Empty: no "costs" object is sent.
+     *
+     * @var array<string, Money>
+     */
+    private array $costs = [];
+
+    /**
      * @param string $orderId
      * @param string $source
      * @param Money $revenue
@@ -342,6 +365,14 @@ class TransactionEvent extends AbstractEvent
                 $fromModel['finalUnitPrice'] = $product->getPrice();
             }
 
+            if ($product->getUnitCost() !== null) {
+                $fromModel['unitCost'] = $product->getUnitCost();
+            }
+
+            if ($product->getExternalId() !== null) {
+                $fromModel['externalId'] = $product->getExternalId();
+            }
+
             $product = $fromModel;
         }
 
@@ -370,7 +401,114 @@ class TransactionEvent extends AbstractEvent
             $product['quantity'] = (int) $product['quantity'];
         }
 
+        if (array_key_exists('unitCost', $product)) {
+            $unitCost = $this->toCostMoney($product['unitCost'], 'products[].unitCost');
+            $product['unitCost'] = $unitCost->toArray();
+        }
+
+        if (array_key_exists('externalId', $product)) {
+            $externalId = $product['externalId'];
+            if (is_int($externalId)) {
+                $externalId = (string) $externalId;
+            }
+            if (!is_string($externalId) || trim($externalId) === '') {
+                throw new ValidationException(
+                    sprintf(
+                        'Invalid products[].externalId: expected a non-empty string, got %s. '
+                        . 'Correct example: "externalId" => "woocommerce:1234".',
+                        is_string($externalId) ? '""' : gettype($externalId)
+                    ),
+                    400
+                );
+            }
+            $product['externalId'] = $externalId;
+        }
+
         return $product;
+    }
+
+    /**
+     * Read a cost value (a number, an ["amount", "currency"] array or a Money instance)
+     * as Money in the revenue currency.
+     *
+     * Costs are compared with revenue to compute profit, so a cost in another currency
+     * or a negative cost is rejected here, before anything is sent.
+     *
+     * @param mixed $value
+     * @param string $field Field name used in the error message
+     * @return Money
+     * @throws ValidationException
+     */
+    private function toCostMoney($value, string $field): Money
+    {
+        $currency = $this->revenue->getCurrency();
+
+        if ($value instanceof Money) {
+            $money = $value;
+        } elseif (is_array($value)) {
+            if (!array_key_exists('amount', $value) || !is_numeric($value['amount'])) {
+                throw new ValidationException(
+                    sprintf(
+                        'Invalid %s: array form requires a numeric "amount" key. Received: %s. '
+                        . 'Correct example: ["amount" => 12.50, "currency" => "%s"].',
+                        $field,
+                        json_encode($value),
+                        $currency
+                    ),
+                    400
+                );
+            }
+            $valueCurrency = isset($value['currency']) && is_string($value['currency']) && $value['currency'] !== ''
+                ? $value['currency']
+                : $currency;
+            $money = new Money((float) $value['amount'], $valueCurrency);
+        } elseif (is_int($value) || is_float($value) || (is_string($value) && is_numeric($value))) {
+            $money = new Money((float) $value, $currency);
+        } else {
+            throw new ValidationException(
+                sprintf(
+                    'Invalid %s: expected a number (e.g. 12.50), ["amount" => 12.50, "currency" => "%s"] '
+                    . 'or a %s instance, got %s.',
+                    $field,
+                    $currency,
+                    Money::class,
+                    is_object($value) ? get_class($value) : gettype($value)
+                ),
+                400
+            );
+        }
+
+        if ($money->getCurrency() !== $currency) {
+            throw new ValidationException(
+                sprintf(
+                    'Invalid %s: the currency %s differs from the revenue currency %s. '
+                    . 'Send costs in the same currency as the revenue.',
+                    $field,
+                    $money->getCurrency(),
+                    $currency
+                ),
+                400
+            );
+        }
+
+        self::assertNonNegative($money->getAmount(), $field);
+
+        return $money;
+    }
+
+    /**
+     * @param float $amount
+     * @param string $field
+     * @throws ValidationException
+     */
+    private static function assertNonNegative(float $amount, string $field): void
+    {
+        if ($amount < 0 || is_nan($amount) || is_infinite($amount)) {
+            throw new ValidationException(
+                sprintf('Invalid %s: expected a number of at least 0, got %s.', $field, (string) $amount),
+                400
+            );
+        }
     }
 
     /**
@@ -419,6 +557,79 @@ class TransactionEvent extends AbstractEvent
             ),
             400
         );
+    }
+
+    /**
+     * Set the total tax of the order, in the revenue currency.
+     *
+     * @param float $tax
+     * @return self
+     * @throws ValidationException If the amount is negative.
+     */
+    public function setTax(float $tax): self
+    {
+        self::assertNonNegative($tax, 'tax');
+        $this->tax = $tax;
+        return $this;
+    }
+
+    /**
+     * Set the shipping charged to the buyer, gross of tax, in the revenue currency.
+     *
+     * This is what the buyer paid for delivery, not what delivery cost you: your own
+     * shipping cost goes into setCosts().
+     *
+     * @param float $shipping
+     * @return self
+     * @throws ValidationException If the amount is negative.
+     */
+    public function setShipping(float $shipping): self
+    {
+        self::assertNonNegative($shipping, 'shipping');
+        $this->shipping = $shipping;
+        return $this;
+    }
+
+    /**
+     * Set whether the revenue and product prices include tax.
+     *
+     * @param bool $taxesIncluded
+     * @return self
+     */
+    public function setTaxesIncluded(bool $taxesIncluded): self
+    {
+        $this->taxesIncluded = $taxesIncluded;
+        return $this;
+    }
+
+    /**
+     * Set the costs you paid for this order, used by profit tracking.
+     *
+     * Each value is a number in the revenue currency, an ["amount", "currency"] array or a
+     * Money instance; pass null for a cost you do not know, so the workspace rule applies
+     * to it. A cost in a currency other than the revenue currency, or a negative cost, is
+     * rejected before sending. Calling it again replaces every cost set before.
+     *
+     * Costs are accepted only with your secret key, which this SDK always uses; never
+     * expose them in a browser.
+     *
+     * @param Money|float|int|array<string, mixed>|null $shipping What delivery cost you
+     * @param Money|float|int|array<string, mixed>|null $paymentFee The payment provider fee
+     * @param Money|float|int|array<string, mixed>|null $handling Packing and handling cost
+     * @return self
+     * @throws ValidationException
+     */
+    public function setCosts($shipping = null, $paymentFee = null, $handling = null): self
+    {
+        $costs = [];
+        foreach (['shipping' => $shipping, 'paymentFee' => $paymentFee, 'handling' => $handling] as $key => $value) {
+            if ($value !== null) {
+                $costs[$key] = $this->toCostMoney($value, 'costs.' . $key);
+            }
+        }
+
+        $this->costs = $costs;
+        return $this;
     }
 
     /**
@@ -679,6 +890,26 @@ class TransactionEvent extends AbstractEvent
 
         if ($this->recordedAt !== null) {
             $data['recordedAt'] = $this->recordedAt->format('Y-m-d\\TH:i:s.v\\Z');
+        }
+
+        // Profit tracking fields. Each is sent only when set, so a transaction built
+        // without them serialises exactly as it did before they existed.
+        if ($this->tax !== null) {
+            $data['tax'] = $this->tax;
+        }
+
+        if ($this->shipping !== null) {
+            $data['shipping'] = $this->shipping;
+        }
+
+        if ($this->taxesIncluded !== null) {
+            $data['taxesIncluded'] = $this->taxesIncluded;
+        }
+
+        if ($this->costs !== []) {
+            $data['costs'] = array_map(static function (Money $cost): array {
+                return $cost->toArray();
+            }, $this->costs);
         }
 
         // Include additional params (attribution data like fbclid, utm_source, etc.)
