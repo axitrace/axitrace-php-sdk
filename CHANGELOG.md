@@ -3,6 +3,27 @@
 All notable changes to the AxiTrace PHP SDK are documented in this file.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0]
+
+### Fixed
+
+- Ad click ids persisted by the AxiTrace JavaScript SDK are read from their first-party
+  cookies when the current URL does not carry them: `_ttclid` -> `ttclid`, `_gclid` ->
+  `gclid`, `_gbraid` -> `gbraid`, `_wbraid` -> `wbraid` (90 days) and `_rdt_cid` ->
+  `rdt_cid`, `_oppref` -> `oppref` (28 days). Before, only `$_GET` was read, so a conversion
+  sent from a request without the click id in its URL (a form POST, a checkout step) left
+  without it and TikTok, Google Ads, Reddit and OpenAI Ads could not attribute it.
+- The click id in the URL still wins over the cookie, a value passed in the event params or
+  through `setAttributionParams()` wins over both, and a cookie that is not in the
+  `v2|<firstSeenMs>|<id>` format or is older than its window is ignored, exactly as the
+  JavaScript SDK does.
+- `oppref` (OpenAI Ads click id) is now read from the URL as well.
+
+### Added
+
+- Reddit Pixel `_rdt_uuid` and OpenAI Ads pixel `__obref` cookies are sent as `rdt_uuid` and
+  `obref`.
+
 ## [1.9.0]
 
 ### Added

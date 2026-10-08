@@ -54,7 +54,7 @@ class AxiTrace
      * - Facebook Conversions API (fbclid, campaign_id, adset_id, ad_id)
      * - Google Ads (gclid, gbraid, wbraid)
      * - TikTok Events API (ttclid)
-     * - Other ad platforms (msclkid, twclid, epik, li_fat_id, sccid, rdt_cid)
+     * - Other ad platforms (msclkid, twclid, epik, li_fat_id, sccid, rdt_cid, oppref)
      * - UTM parameters for analytics
      */
     private const ATTRIBUTION_URL_PARAMS = [
@@ -81,6 +81,8 @@ class AxiTrace
         'sccid',        // Snapchat Click ID
         // Reddit
         'rdt_cid',      // Reddit Click ID
+        // OpenAI Ads
+        'oppref',       // OpenAI Ads Click ID
         // UTM Parameters
         'utm_source',
         'utm_medium',
@@ -99,11 +101,43 @@ class AxiTrace
      * - _ga: Google Analytics Client ID
      */
     private const ATTRIBUTION_COOKIES = [
-        '_fbp',  // Facebook Browser ID
-        '_fbc',  // Facebook Click ID Cookie
-        '_ttp',  // TikTok Browser ID
-        '_ga',   // Google Analytics Client ID
+        '_fbp',      // Facebook Browser ID
+        '_fbc',      // Facebook Click ID Cookie
+        '_ttp',      // TikTok Browser ID
+        '_ga',       // Google Analytics Client ID
+        '_rdt_uuid', // Reddit Browser ID (set by the Reddit Pixel)
+        '__obref',   // OpenAI Ads Browser Reference (set by the OpenAI Ads pixel)
     ];
+
+    /**
+     * Click-id cookies written by the AxiTrace JavaScript SDK, keyed by the param name
+     * the ingestion API expects, with the cookie name and the age in days after which
+     * the JavaScript SDK itself stops replaying the click.
+     *
+     * The JavaScript SDK reads a click id from the landing URL and keeps it in a
+     * first-party cookie, because the conversion usually happens on a later request
+     * whose URL no longer carries it (a form POST, a checkout step, a return visit).
+     * Reading only $_GET therefore lost the click on exactly the requests where
+     * server-side conversions are sent. A click id in the current URL always wins:
+     * a fresh ad click replaces the stored one.
+     *
+     * Values have the format "v2|<firstSeenMs>|<clickId>". Anything else (including
+     * the unprefixed legacy format, which the JavaScript SDK deletes on read) is
+     * ignored, and so is a value older than its maximum age.
+     */
+    private const PERSISTED_CLICK_ID_COOKIES = [
+        'gclid' => ['_gclid', 90],
+        'gbraid' => ['_gbraid', 90],
+        'wbraid' => ['_wbraid', 90],
+        'ttclid' => ['_ttclid', 90],
+        'rdt_cid' => ['_rdt_cid', 28],
+        'oppref' => ['_oppref', 28],
+    ];
+
+    /**
+     * Version prefix of the click-id cookie format written by the JavaScript SDK.
+     */
+    private const CLICK_ID_COOKIE_VERSION_PREFIX = 'v2|';
 
     /**
      * Visitor consent states AxiTrace understands, shared by every surface of the
@@ -565,7 +599,24 @@ class AxiTrace
             }
         }
 
-        // Extract attribution cookies (_fbp, _fbc, _ttp, _ga)
+        // Fall back to the click ids the JavaScript SDK persisted in first-party
+        // cookies (_ttclid, _gclid, ...). The URL value read above takes precedence.
+        foreach (self::PERSISTED_CLICK_ID_COOKIES as $param => [$cookieName, $maxAgeDays]) {
+            if (isset($this->attributionParams[$param])) {
+                continue;
+            }
+
+            if (!isset($_COOKIE[$cookieName]) || !is_string($_COOKIE[$cookieName])) {
+                continue;
+            }
+
+            $clickId = $this->parseClickIdCookie($_COOKIE[$cookieName], $maxAgeDays, $maxLength);
+            if ($clickId !== null) {
+                $this->attributionParams[$param] = $clickId;
+            }
+        }
+
+        // Extract attribution cookies (_fbp, _fbc, _ttp, _ga, _rdt_uuid, __obref)
         foreach (self::ATTRIBUTION_COOKIES as $cookieName) {
             if (isset($_COOKIE[$cookieName]) && $_COOKIE[$cookieName] !== '') {
                 // Remove underscore prefix for param names (ingestion API expects fbp, not _fbp)
@@ -611,6 +662,46 @@ class AxiTrace
         $value = preg_replace('/[\x00-\x1F\x7F]/', '', $value);
 
         return trim($value ?? '');
+    }
+
+    /**
+     * Read the click id out of a cookie written by the JavaScript SDK.
+     *
+     * Format: "v2|<firstSeenMs>|<clickId>", where firstSeenMs is the time the click was
+     * first seen. Mirrors the JavaScript SDK's own read (getClickIdCookie): an unversioned
+     * value, a missing or non-numeric timestamp, an empty click id and a click older than
+     * $maxAgeDays all yield null, so the server never replays a click the browser would
+     * no longer send.
+     *
+     * @param string $raw Cookie value as PHP decoded it into $_COOKIE
+     * @param int $maxAgeDays Maximum age of the click, counted from firstSeenMs
+     * @param int $maxLength Maximum length of the sanitized click id
+     * @return string|null The click id, or null when the cookie is unusable
+     */
+    private function parseClickIdCookie(string $raw, int $maxAgeDays, int $maxLength): ?string
+    {
+        if (strpos($raw, self::CLICK_ID_COOKIE_VERSION_PREFIX) !== 0) {
+            return null;
+        }
+
+        $parts = explode('|', $raw, 3);
+        if (count($parts) !== 3 || !preg_match('/^\d{1,15}$/', $parts[1])) {
+            return null;
+        }
+
+        $firstSeenMs = (int) $parts[1];
+        if ($firstSeenMs <= 0) {
+            return null;
+        }
+
+        $nowMs = (int) floor(microtime(true) * 1000);
+        if ($nowMs - $firstSeenMs > $maxAgeDays * 86400000) {
+            return null;
+        }
+
+        $clickId = $this->sanitizeAttributionValue($parts[2], $maxLength);
+
+        return $clickId !== '' ? $clickId : null;
     }
 
     /**

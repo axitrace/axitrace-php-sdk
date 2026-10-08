@@ -470,6 +470,23 @@ $event->setUserId('user-database-id');
 
 At least one identifier is required for all events.
 
+## Ad click ids and browser ids
+
+Inside a web request the SDK reads the ad identifiers itself when it is created, and sends
+them in the `params` of every event:
+
+| Source | Identifiers |
+|--------|-------------|
+| URL of the current request | `fbclid`, `gclid`, `gbraid`, `wbraid`, `ttclid`, `msclkid`, `twclid`, `epik`, `li_fat_id`, `sccid`, `rdt_cid`, `oppref`, `utm_*`, `campaign_id`, `adset_id`, `ad_id` |
+| Click-id cookies set by the AxiTrace JavaScript SDK (SDK 1.10.0+) | `_gclid`, `_gbraid`, `_wbraid`, `_ttclid` (90 days), `_rdt_cid`, `_oppref` (28 days) |
+| Ad platform pixel cookies | `_fbp`, `_fbc`, `_ttp`, `_ga`, `_rdt_uuid` and `__obref` (SDK 1.10.0+) |
+
+The JavaScript SDK keeps a click id from the landing page URL in a first-party cookie, so a
+conversion sent from a later request (a form POST, a checkout step) still carries the click
+that brought the visitor. A click id in the current URL wins over the cookie, and a click
+older than the window above is not sent. A value you pass yourself, in the event params or
+through `setAttributionParams()`, wins over both.
+
 ## Sending events outside a web request (queue, cron, webhook)
 
 `transaction()` and every other `AxiTrace` facade method resolve the visitor via
@@ -511,6 +528,10 @@ $axiTrace->withContext([
     ]
 );
 ```
+
+The ad click ids and browser ids (see "Ad click ids and browser ids" above) are not there
+either. Store `$axiTrace->getAttributionParams()` on the order during the visitor's request
+and pass it to `setAttributionParams()` in the job, before sending the event.
 
 ### Dating a late transaction: `recorded_at`
 
