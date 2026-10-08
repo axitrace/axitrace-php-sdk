@@ -3,6 +3,22 @@
 All notable changes to the AxiTrace PHP SDK are documented in this file.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0]
+
+### Added
+
+- The click ids the AxiTrace JavaScript SDK persists since 0.24.0 are read from their
+  first-party cookies when the current URL does not carry them, in the same
+  `v2|<firstSeenMs>|<id>` format and with the same windows: `_axi_msclkid` -> `msclkid`,
+  `_axi_twclid` -> `twclid` (90 days), `_axi_epik` -> `epik` (60 days), `_axi_li_fat_id`
+  -> `li_fat_id` (30 days), `_axi_sccid` -> `sccid` (28 days).
+- When neither the URL nor the AxiTrace cookie has the click id, the ad platform's own
+  cookie is read (never written): `_uetmsclkid` (Microsoft UET, the `_uet` prefix is
+  removed), `_twclid` (X, JSON or the bare id), `_epik` (Pinterest) and `li_fat_id`
+  (LinkedIn). A value that is empty or longer than 500 characters is ignored.
+- Snapchat's click id is read from its own URL parameter `ScCid` as well as `sccid`;
+  `ScCid` wins when both are present.
+
 ## [1.10.0]
 
 ### Fixed

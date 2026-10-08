@@ -132,7 +132,37 @@ class AxiTrace
         'ttclid' => ['_ttclid', 90],
         'rdt_cid' => ['_rdt_cid', 28],
         'oppref' => ['_oppref', 28],
+        // Added in JavaScript SDK 0.24.0. The "_axi_" prefix keeps them apart from the
+        // platforms' own cookies of the same name (_twclid, _epik, li_fat_id).
+        'msclkid' => ['_axi_msclkid', 90],
+        'twclid' => ['_axi_twclid', 90],
+        'epik' => ['_axi_epik', 60],
+        'li_fat_id' => ['_axi_li_fat_id', 30],
+        'sccid' => ['_axi_sccid', 28],
     ];
+
+    /**
+     * Cookies the ad platforms' own tags write, read (never written) as the last
+     * fallback for a click id that neither the URL nor the AxiTrace cookie carries,
+     * exactly as the JavaScript SDK does since 0.24.0. Their lifetime is the
+     * platform's own, so no age check applies.
+     *
+     * - _uetmsclkid: Microsoft UET writes "_uet" + msclkid (a bare msclkid is accepted)
+     * - _twclid: the X pixel writes JSON {"twclid": "..."}, the X server-side tag the bare id
+     * - _epik, li_fat_id: the bare click id
+     */
+    private const VENDOR_CLICK_ID_COOKIES = [
+        'msclkid' => '_uetmsclkid',
+        'twclid' => '_twclid',
+        'epik' => '_epik',
+        'li_fat_id' => 'li_fat_id',
+    ];
+
+    /**
+     * Snapchat appends its click id as "ScCid" (case-sensitive); "sccid" is accepted
+     * too, and "ScCid" wins when both are present (JavaScript SDK 0.24.0).
+     */
+    private const SNAPCHAT_URL_PARAM = 'ScCid';
 
     /**
      * Version prefix of the click-id cookie format written by the JavaScript SDK.
@@ -599,6 +629,13 @@ class AxiTrace
             }
         }
 
+        if (isset($_GET[self::SNAPCHAT_URL_PARAM]) && is_string($_GET[self::SNAPCHAT_URL_PARAM])) {
+            $sanitized = $this->sanitizeAttributionValue($_GET[self::SNAPCHAT_URL_PARAM], $maxLength);
+            if ($sanitized !== '') {
+                $this->attributionParams['sccid'] = $sanitized;
+            }
+        }
+
         // Fall back to the click ids the JavaScript SDK persisted in first-party
         // cookies (_ttclid, _gclid, ...). The URL value read above takes precedence.
         foreach (self::PERSISTED_CLICK_ID_COOKIES as $param => [$cookieName, $maxAgeDays]) {
@@ -611,6 +648,22 @@ class AxiTrace
             }
 
             $clickId = $this->parseClickIdCookie($_COOKIE[$cookieName], $maxAgeDays, $maxLength);
+            if ($clickId !== null) {
+                $this->attributionParams[$param] = $clickId;
+            }
+        }
+
+        // Last resort: the click id in the platform's own cookie.
+        foreach (self::VENDOR_CLICK_ID_COOKIES as $param => $cookieName) {
+            if (isset($this->attributionParams[$param])) {
+                continue;
+            }
+
+            if (!isset($_COOKIE[$cookieName]) || !is_string($_COOKIE[$cookieName])) {
+                continue;
+            }
+
+            $clickId = $this->readVendorClickId($cookieName, $_COOKIE[$cookieName], $maxLength);
             if ($clickId !== null) {
                 $this->attributionParams[$param] = $clickId;
             }
@@ -662,6 +715,33 @@ class AxiTrace
         $value = preg_replace('/[\x00-\x1F\x7F]/', '', $value);
 
         return trim($value ?? '');
+    }
+
+    /**
+     * Read the click id out of an ad platform's own cookie (VENDOR_CLICK_ID_COOKIES).
+     *
+     * Mirrors the JavaScript SDK's readVendorClickId(): "_uet" is stripped from
+     * _uetmsclkid, the twclid key is taken from a JSON _twclid, and a value that is
+     * empty or longer than $maxLength is rejected rather than truncated.
+     */
+    private function readVendorClickId(string $cookieName, string $raw, int $maxLength): ?string
+    {
+        $value = trim($raw);
+
+        if ($cookieName === '_uetmsclkid' && strpos($value, '_uet') === 0) {
+            $value = substr($value, 4);
+        } elseif ($cookieName === '_twclid' && strpos($value, '{') === 0) {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) && is_string($decoded['twclid'] ?? null) ? trim($decoded['twclid']) : '';
+        }
+
+        if ($value === '' || strlen($value) > $maxLength) {
+            return null;
+        }
+
+        $clickId = $this->sanitizeAttributionValue($value, $maxLength);
+
+        return $clickId !== '' ? $clickId : null;
     }
 
     /**

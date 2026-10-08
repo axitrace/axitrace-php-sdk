@@ -112,6 +112,11 @@ class AxiTraceClickIdCookieTest extends TestCase
             'Google wbraid' => ['wbraid', '_wbraid', 90],
             'Reddit rdt_cid' => ['rdt_cid', '_rdt_cid', 28],
             'OpenAI Ads oppref' => ['oppref', '_oppref', 28],
+            'Microsoft msclkid' => ['msclkid', '_axi_msclkid', 90],
+            'X twclid' => ['twclid', '_axi_twclid', 90],
+            'Pinterest epik' => ['epik', '_axi_epik', 60],
+            'LinkedIn li_fat_id' => ['li_fat_id', '_axi_li_fat_id', 30],
+            'Snapchat sccid' => ['sccid', '_axi_sccid', 28],
         ];
     }
 
@@ -336,5 +341,120 @@ class AxiTraceClickIdCookieTest extends TestCase
         $this->createAxiTrace()->startTrial('free', [$param => 'explicit-value']);
 
         $this->assertSame('explicit-value', $this->lastRequestParams()[$param] ?? null);
+    }
+
+    public function testSnapchatCapitalisedUrlParamIsReadAsSccid(): void
+    {
+        $_GET['ScCid'] = 'snap-click';
+        $_COOKIE['_axi_sccid'] = self::cookieValue('snap-cookie');
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $this->assertSame('snap-click', $this->lastRequestParams()['sccid'] ?? null);
+    }
+
+    public function testSnapchatCapitalisedUrlParamWinsOverLowercase(): void
+    {
+        $_GET['ScCid'] = 'snap-capital';
+        $_GET['sccid'] = 'snap-lower';
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $this->assertSame('snap-capital', $this->lastRequestParams()['sccid'] ?? null);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string, 2: string, 3: string}>
+     */
+    public function vendorCookieProvider(): array
+    {
+        return [
+            'UET with _uet prefix' => ['msclkid', '_uetmsclkid', '_uetabc123', 'abc123'],
+            'UET bare' => ['msclkid', '_uetmsclkid', 'abc123', 'abc123'],
+            'X pixel JSON' => ['twclid', '_twclid', '{"twclid":"x-click","timestamp":1}', 'x-click'],
+            'X server-side tag bare' => ['twclid', '_twclid', 'x-click', 'x-click'],
+            'Pinterest' => ['epik', '_epik', 'dj0yJnU9abc', 'dj0yJnU9abc'],
+            'LinkedIn Insight Tag' => ['li_fat_id', 'li_fat_id', 'li-uuid-1', 'li-uuid-1'],
+        ];
+    }
+
+    /**
+     * @dataProvider vendorCookieProvider
+     */
+    public function testPlatformCookieIsTheLastFallback(string $param, string $cookieName, string $raw, string $expected): void
+    {
+        $_COOKIE[$cookieName] = $raw;
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $this->assertSame($expected, $this->lastRequestParams()[$param] ?? null);
+    }
+
+    /**
+     * @dataProvider vendorCookieProvider
+     */
+    public function testAxiTraceCookieWinsOverPlatformCookie(string $param, string $cookieName, string $raw, string $expected): void
+    {
+        $_COOKIE[$cookieName] = $raw;
+        $_COOKIE['_axi_' . $param] = self::cookieValue('from-axitrace-cookie');
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $this->assertSame('from-axitrace-cookie', $this->lastRequestParams()[$param] ?? null);
+    }
+
+    /**
+     * @dataProvider vendorCookieProvider
+     */
+    public function testUrlWinsOverPlatformCookie(string $param, string $cookieName, string $raw, string $expected): void
+    {
+        $_COOKIE[$cookieName] = $raw;
+        $_GET[$param] = 'from-url';
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $this->assertSame('from-url', $this->lastRequestParams()[$param] ?? null);
+    }
+
+    /**
+     * An AxiTrace cookie past its window does not block the platform cookie.
+     */
+    public function testExpiredAxiTraceCookieFallsBackToPlatformCookie(): void
+    {
+        $_COOKIE['_axi_epik'] = self::cookieValue('stale', 61);
+        $_COOKIE['_epik'] = 'fresh-epik';
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $this->assertSame('fresh-epik', $this->lastRequestParams()['epik'] ?? null);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public function unusablePlatformCookieProvider(): array
+    {
+        return [
+            'X invalid JSON' => ['_twclid', '{not json'],
+            'X JSON without twclid' => ['_twclid', '{"other":"x"}'],
+            'UET prefix only' => ['_uetmsclkid', '_uet'],
+            'blank' => ['_epik', '   '],
+            'longer than 500 characters' => ['li_fat_id', str_repeat('a', 501)],
+        ];
+    }
+
+    /**
+     * @dataProvider unusablePlatformCookieProvider
+     */
+    public function testUnusablePlatformCookieIsIgnored(string $cookieName, string $raw): void
+    {
+        $_COOKIE[$cookieName] = $raw;
+
+        $this->createAxiTrace()->startTrial('free');
+
+        $params = $this->lastRequestParams();
+        foreach (['msclkid', 'twclid', 'epik', 'li_fat_id'] as $param) {
+            $this->assertArrayNotHasKey($param, $params);
+        }
     }
 }

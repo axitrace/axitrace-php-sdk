@@ -477,14 +477,17 @@ them in the `params` of every event:
 
 | Source | Identifiers |
 |--------|-------------|
-| URL of the current request | `fbclid`, `gclid`, `gbraid`, `wbraid`, `ttclid`, `msclkid`, `twclid`, `epik`, `li_fat_id`, `sccid`, `rdt_cid`, `oppref`, `utm_*`, `campaign_id`, `adset_id`, `ad_id` |
+| URL of the current request | `fbclid`, `gclid`, `gbraid`, `wbraid`, `ttclid`, `msclkid`, `twclid`, `epik`, `li_fat_id`, `ScCid` or `sccid` (SDK 1.11.0+ reads Snapchat's `ScCid`), `rdt_cid`, `oppref`, `utm_*`, `campaign_id`, `adset_id`, `ad_id` |
 | Click-id cookies set by the AxiTrace JavaScript SDK (SDK 1.10.0+) | `_gclid`, `_gbraid`, `_wbraid`, `_ttclid` (90 days), `_rdt_cid`, `_oppref` (28 days) |
+| Click-id cookies set by the AxiTrace JavaScript SDK 0.24.0+ (SDK 1.11.0+) | `_axi_msclkid`, `_axi_twclid` (90 days), `_axi_epik` (60 days), `_axi_li_fat_id` (30 days), `_axi_sccid` (28 days) |
+| Ad platforms' own click-id cookies, last fallback (SDK 1.11.0+) | `_uetmsclkid` (Microsoft UET), `_twclid` (X), `_epik` (Pinterest), `li_fat_id` (LinkedIn) |
 | Ad platform pixel cookies | `_fbp`, `_fbc`, `_ttp`, `_ga`, `_rdt_uuid` and `__obref` (SDK 1.10.0+) |
 
 The JavaScript SDK keeps a click id from the landing page URL in a first-party cookie, so a
 conversion sent from a later request (a form POST, a checkout step) still carries the click
 that brought the visitor. A click id in the current URL wins over the cookie, and a click
-older than the window above is not sent. A value you pass yourself, in the event params or
+older than the window above is not sent. The platforms' own cookies are read only when
+neither the URL nor the AxiTrace cookie has the click id, and never written. A value you pass yourself, in the event params or
 through `setAttributionParams()`, wins over both.
 
 ## Sending events outside a web request (queue, cron, webhook)
