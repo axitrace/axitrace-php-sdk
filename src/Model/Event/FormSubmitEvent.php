@@ -14,6 +14,8 @@ use AxiTrace\Model\ClientIdentity;
  */
 class FormSubmitEvent extends AbstractEvent
 {
+    use LeadProductsTrait;
+
     /**
      * @var string
      */
@@ -33,6 +35,16 @@ class FormSubmitEvent extends AbstractEvent
      * @var string|null
      */
     private ?string $eventSalt = null;
+
+    /**
+     * @var float|null
+     */
+    private ?float $value = null;
+
+    /**
+     * @var string|null
+     */
+    private ?string $currency = null;
 
     /**
      * @param string $label Form identifier (e.g., "contact-form", "newsletter-signup")
@@ -159,6 +171,22 @@ class FormSubmitEvent extends AbstractEvent
     }
 
     /**
+     * Set the value of the lead (e.g. the quoted amount), sent as root value and currency.
+     *
+     * Context for reports, never counted as revenue.
+     *
+     * @param float $value
+     * @param string $currency ISO 4217 code
+     * @return self
+     */
+    public function setValue(float $value, string $currency): self
+    {
+        $this->value = $value;
+        $this->currency = strtoupper($currency);
+        return $this;
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function validate(): void
@@ -200,6 +228,19 @@ class FormSubmitEvent extends AbstractEvent
 
         if ($this->eventSalt !== null) {
             $data['eventSalt'] = $this->eventSalt;
+        }
+
+        $products = $this->buildLeadProducts($this->currency);
+        if ($products !== []) {
+            $data['products'] = $products;
+        }
+
+        if ($this->value !== null) {
+            $data['value'] = $this->value;
+        }
+
+        if ($this->currency !== null) {
+            $data['currency'] = $this->currency;
         }
 
         return $data;

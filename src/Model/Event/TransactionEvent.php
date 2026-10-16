@@ -8,6 +8,7 @@ use AxiTrace\Exception\ValidationException;
 use AxiTrace\Model\ClientIdentity;
 use AxiTrace\Model\Money;
 use AxiTrace\Model\Product;
+use AxiTrace\Model\ProductNormalizer;
 
 /**
  * Transaction event.
@@ -337,16 +338,10 @@ class TransactionEvent extends AbstractEvent
     /**
      * Normalize a single product entry into the shape the /v1/transaction endpoint expects.
      *
-     * Fixes the two most common integration mistakes that otherwise reach the API as an
-     * opaque "Invalid JSON" 400:
-     * - a scalar finalUnitPrice (e.g. 89.99, the natural thing to write) is wrapped into
-     *   {amount: 89.99, currency: <transaction currency>}
-     * - a numeric-string quantity (e.g. "2", common when values come from $_POST/CSV) is
-     *   cast to an int
-     *
-     * A Product model instance is converted using its sku (falling back to item ID), name,
-     * price and quantity. Throws immediately - before the event is ever sent - if a value
-     * cannot be safely coerced.
+     * Strict mode of the shared ProductNormalizer: a scalar finalUnitPrice is wrapped in the
+     * transaction currency, a numeric-string quantity is cast to int, and anything that
+     * cannot be safely coerced throws before the event is ever sent. unitCost is checked
+     * against the revenue currency (see toCostMoney()).
      *
      * @param array<string, mixed>|Product $product
      * @return array<string, mixed>
@@ -354,77 +349,13 @@ class TransactionEvent extends AbstractEvent
      */
     private function normalizeProduct($product): array
     {
-        if ($product instanceof Product) {
-            $fromModel = [
-                'sku' => $product->getSku() ?? $product->getItemId(),
-                'name' => $product->getItemName(),
-                'quantity' => $product->getQuantity() ?? 1,
-            ];
-
-            if ($product->getPrice() !== null) {
-                $fromModel['finalUnitPrice'] = $product->getPrice();
+        return ProductNormalizer::normalize(
+            $product,
+            $this->value->getCurrency(),
+            function ($unitCost): array {
+                return $this->toCostMoney($unitCost, 'products[].unitCost')->toArray();
             }
-
-            if ($product->getUnitCost() !== null) {
-                $fromModel['unitCost'] = $product->getUnitCost();
-            }
-
-            if ($product->getExternalId() !== null) {
-                $fromModel['externalId'] = $product->getExternalId();
-            }
-
-            $product = $fromModel;
-        }
-
-        if (!is_array($product)) {
-            throw new ValidationException(
-                sprintf(
-                    'Invalid transaction product: expected an array or an %s instance, got %s. '
-                    . 'Example: ["sku" => "SKU-001", "name" => "Product 1", '
-                    . '"finalUnitPrice" => 89.99, "quantity" => 1].',
-                    Product::class,
-                    is_object($product) ? get_class($product) : gettype($product)
-                ),
-                400
-            );
-        }
-
-        if (array_key_exists('finalUnitPrice', $product)) {
-            $product['finalUnitPrice'] = $this->normalizeFinalUnitPrice($product['finalUnitPrice']);
-        }
-
-        if (
-            array_key_exists('quantity', $product)
-            && is_string($product['quantity'])
-            && is_numeric($product['quantity'])
-        ) {
-            $product['quantity'] = (int) $product['quantity'];
-        }
-
-        if (array_key_exists('unitCost', $product)) {
-            $unitCost = $this->toCostMoney($product['unitCost'], 'products[].unitCost');
-            $product['unitCost'] = $unitCost->toArray();
-        }
-
-        if (array_key_exists('externalId', $product)) {
-            $externalId = $product['externalId'];
-            if (is_int($externalId)) {
-                $externalId = (string) $externalId;
-            }
-            if (!is_string($externalId) || trim($externalId) === '') {
-                throw new ValidationException(
-                    sprintf(
-                        'Invalid products[].externalId: expected a non-empty string, got %s. '
-                        . 'Correct example: "externalId" => "woocommerce:1234".',
-                        is_string($externalId) ? '""' : gettype($externalId)
-                    ),
-                    400
-                );
-            }
-            $product['externalId'] = $externalId;
-        }
-
-        return $product;
+        );
     }
 
     /**
@@ -509,54 +440,6 @@ class TransactionEvent extends AbstractEvent
                 400
             );
         }
-    }
-
-    /**
-     * Normalize a products[].finalUnitPrice value into {amount: float, currency: string}.
-     *
-     * Accepts a bare number (the natural thing to write) or an already-shaped
-     * ["amount" => ..., "currency" => ...] array. When currency is omitted it defaults to
-     * the transaction's own currency.
-     *
-     * @param mixed $value
-     * @return array<string, mixed>
-     * @throws ValidationException
-     */
-    private function normalizeFinalUnitPrice($value): array
-    {
-        if (is_array($value)) {
-            if (!array_key_exists('amount', $value) || !is_numeric($value['amount'])) {
-                throw new ValidationException(
-                    sprintf(
-                        'Invalid products[].finalUnitPrice: array form requires a numeric "amount" key. '
-                        . 'Received: %s. Correct example: ["amount" => 89.99, "currency" => "USD"].',
-                        json_encode($value)
-                    ),
-                    400
-                );
-            }
-
-            $currency = $this->value->getCurrency();
-            if (isset($value['currency']) && is_string($value['currency']) && $value['currency'] !== '') {
-                $currency = strtoupper($value['currency']);
-            }
-
-            return ['amount' => (float) $value['amount'], 'currency' => $currency];
-        }
-
-        if (is_int($value) || is_float($value) || (is_string($value) && is_numeric($value))) {
-            return ['amount' => (float) $value, 'currency' => $this->value->getCurrency()];
-        }
-
-        throw new ValidationException(
-            sprintf(
-                'Invalid products[].finalUnitPrice: expected a number (e.g. 89.99) or '
-                . '["amount" => 89.99, "currency" => "USD"], got %s. '
-                . 'Correct example: "finalUnitPrice" => 89.99.',
-                is_object($value) ? get_class($value) : gettype($value)
-            ),
-            400
-        );
     }
 
     /**

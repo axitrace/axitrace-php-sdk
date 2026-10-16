@@ -1446,6 +1446,10 @@ class AxiTrace
     /**
      * Track subscription.
      *
+     * Besides subscription_type, $params may carry "eventSalt" (retry identity),
+     * "products" (lines in the transaction product shape; invalid lines are dropped) and
+     * "value" with "currency"; everything else is sent as params.
+     *
      * @param string $email
      * @param array<string, mixed> $params
      * @return Response
@@ -1462,6 +1466,21 @@ class AxiTrace
             unset($params['subscription_type']);
         }
 
+        $eventSalt = self::pullEventSalt($params);
+        if ($eventSalt !== null) {
+            $event->setEventSalt($eventSalt);
+        }
+
+        $products = self::pullLeadProducts($params);
+        if ($products !== null) {
+            $event->setProducts($products);
+        }
+
+        $value = self::pullLeadValue($params);
+        if ($value !== null) {
+            $event->setValue($value[0], $value[1]);
+        }
+
         if (!empty($params)) {
             $event->setParams($params);
         }
@@ -1471,6 +1490,10 @@ class AxiTrace
 
     /**
      * Track start trial.
+     *
+     * Besides the trial fields, $params may carry "eventSalt" (retry identity) and
+     * "products" (lines in the transaction product shape; invalid lines are dropped).
+     * The trial value stays trial_value with trial_currency.
      *
      * @param string $planName
      * @param array<string, mixed> $params
@@ -1501,6 +1524,16 @@ class AxiTrace
         if (isset($params['email'])) {
             $event->setEmail($params['email']);
             unset($params['email']);
+        }
+
+        $eventSalt = self::pullEventSalt($params);
+        if ($eventSalt !== null) {
+            $event->setEventSalt($eventSalt);
+        }
+
+        $products = self::pullLeadProducts($params);
+        if ($products !== null) {
+            $event->setProducts($products);
         }
 
         if (!empty($params)) {
@@ -1559,6 +1592,10 @@ class AxiTrace
     /**
      * Track form submit.
      *
+     * $params may carry "eventSalt" (retry identity), "products" (lines in the transaction
+     * product shape; invalid lines are dropped) and "value" with "currency"; everything
+     * else is sent as params.
+     *
      * @param string $label
      * @param array<string, mixed> $formData
      * @param array<string, mixed> $params
@@ -1578,6 +1615,21 @@ class AxiTrace
 
         $event = new FormSubmitEvent($label);
         $event->setFormParams($formData);
+
+        $eventSalt = self::pullEventSalt($params);
+        if ($eventSalt !== null) {
+            $event->setEventSalt($eventSalt);
+        }
+
+        $products = self::pullLeadProducts($params);
+        if ($products !== null) {
+            $event->setProducts($products);
+        }
+
+        $value = self::pullLeadValue($params);
+        if ($value !== null) {
+            $event->setValue($value[0], $value[1]);
+        }
 
         // Set client identity
         $clientId = $this->getVisitorId();
@@ -1699,6 +1751,76 @@ class AxiTrace
     public function getConfig(): Config
     {
         return $this->config;
+    }
+
+    /**
+     * Take the retry identity of a lead event out of the helper params.
+     *
+     * @param array<string, mixed> $params
+     * @return string|null
+     */
+    private static function pullEventSalt(array &$params): ?string
+    {
+        if (!isset($params['eventSalt']) || !is_scalar($params['eventSalt']) || (string) $params['eventSalt'] === '') {
+            return null;
+        }
+
+        $eventSalt = (string) $params['eventSalt'];
+        unset($params['eventSalt']);
+
+        return $eventSalt;
+    }
+
+    /**
+     * Take the product lines of a lead event out of the helper params.
+     *
+     * @param array<string, mixed> $params
+     * @return array<int, array<string, mixed>|\AxiTrace\Model\Product>|null
+     * @throws ValidationException If "products" is present but not a list.
+     */
+    private static function pullLeadProducts(array &$params): ?array
+    {
+        if (!array_key_exists('products', $params)) {
+            return null;
+        }
+
+        $products = $params['products'];
+        if (!is_array($products)) {
+            throw new ValidationException(
+                sprintf(
+                    'Invalid products: expected a list of products, got %s. Example: "products" => '
+                    . '[["sku" => "SKU-001", "name" => "Product 1", "finalUnitPrice" => 89.99, "quantity" => 1]].',
+                    is_object($products) ? get_class($products) : gettype($products)
+                ),
+                400
+            );
+        }
+        unset($params['products']);
+
+        return array_values($products);
+    }
+
+    /**
+     * Take the value and currency of a lead event out of the helper params, when both are set.
+     *
+     * @param array<string, mixed> $params
+     * @return array{0: float, 1: string}|null
+     */
+    private static function pullLeadValue(array &$params): ?array
+    {
+        if (
+            !isset($params['value'], $params['currency'])
+            || !is_numeric($params['value'])
+            || !is_string($params['currency'])
+            || $params['currency'] === ''
+        ) {
+            return null;
+        }
+
+        $value = [(float) $params['value'], $params['currency']];
+        unset($params['value'], $params['currency']);
+
+        return $value;
     }
 
     /**

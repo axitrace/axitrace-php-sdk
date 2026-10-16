@@ -13,6 +13,8 @@ use AxiTrace\Exception\ValidationException;
  */
 class StartTrialEvent extends AbstractEvent
 {
+    use LeadProductsTrait;
+
     /**
      * @var string
      */
@@ -42,6 +44,11 @@ class StartTrialEvent extends AbstractEvent
      * @var string|null
      */
     private ?string $email = null;
+
+    /**
+     * @var string|null
+     */
+    private ?string $eventSalt = null;
 
     /**
      * @param string $planName
@@ -118,6 +125,18 @@ class StartTrialEvent extends AbstractEvent
     }
 
     /**
+     * Set event salt for deduplication: a retried trial start with the same salt is stored once.
+     *
+     * @param string $eventSalt
+     * @return self
+     */
+    public function setEventSalt(string $eventSalt): self
+    {
+        $this->eventSalt = $eventSalt;
+        return $this;
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function validate(): void
@@ -156,6 +175,15 @@ class StartTrialEvent extends AbstractEvent
 
         if ($this->email !== null) {
             $data['email'] = $this->email;
+        }
+
+        if ($this->eventSalt !== null) {
+            $data['eventSalt'] = $this->eventSalt;
+        }
+
+        $products = $this->buildLeadProducts($this->trialCurrency);
+        if ($products !== []) {
+            $data['products'] = $products;
         }
 
         return $this->addParamsToArray($data);

@@ -24,6 +24,8 @@ use AxiTrace\Exception\ValidationException;
  */
 final class CustomEvent extends AbstractEvent
 {
+    use LeadProductsTrait;
+
     /** The key pattern every custom event key follows (A9). */
     public const KEY_PATTERN = '/^[a-z][a-z0-9_]{0,39}$/';
 
@@ -51,7 +53,7 @@ final class CustomEvent extends AbstractEvent
         ?float $value = null,
         ?string $currency = null,
         ?string $transactionId = null,
-        ?string $eventId = null,
+        ?string $eventId = null
     ) {
         $this->key = $key;
         $this->properties = $properties;
@@ -129,6 +131,11 @@ final class CustomEvent extends AbstractEvent
 
         if ($this->sessionId !== null && $this->sessionId !== '') {
             $payload['session_id'] = $this->sessionId;
+        }
+
+        $products = $this->buildLeadProducts($this->currency);
+        if ($products !== []) {
+            $payload['products'] = $products;
         }
 
         return $payload;

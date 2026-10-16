@@ -13,6 +13,8 @@ use AxiTrace\Exception\ValidationException;
  */
 class SubscribeEvent extends AbstractEvent
 {
+    use LeadProductsTrait;
+
     /**
      * @var string
      */
@@ -22,6 +24,21 @@ class SubscribeEvent extends AbstractEvent
      * @var string|null
      */
     private ?string $subscriptionType = null;
+
+    /**
+     * @var string|null
+     */
+    private ?string $eventSalt = null;
+
+    /**
+     * @var float|null
+     */
+    private ?float $value = null;
+
+    /**
+     * @var string|null
+     */
+    private ?string $currency = null;
 
     /**
      * @param string $email
@@ -60,6 +77,34 @@ class SubscribeEvent extends AbstractEvent
     }
 
     /**
+     * Set event salt for deduplication: a retried submission with the same salt is stored once.
+     *
+     * @param string $eventSalt
+     * @return self
+     */
+    public function setEventSalt(string $eventSalt): self
+    {
+        $this->eventSalt = $eventSalt;
+        return $this;
+    }
+
+    /**
+     * Set the value of the subscription, sent as root value and currency.
+     *
+     * Context for reports, never counted as revenue.
+     *
+     * @param float $value
+     * @param string $currency ISO 4217 code
+     * @return self
+     */
+    public function setValue(float $value, string $currency): self
+    {
+        $this->value = $value;
+        $this->currency = strtoupper($currency);
+        return $this;
+    }
+
+    /**
      * {@inheritdoc}
      */
     public function validate(): void
@@ -86,6 +131,23 @@ class SubscribeEvent extends AbstractEvent
 
         if ($this->subscriptionType !== null) {
             $data['subscription_type'] = $this->subscriptionType;
+        }
+
+        if ($this->eventSalt !== null) {
+            $data['eventSalt'] = $this->eventSalt;
+        }
+
+        $products = $this->buildLeadProducts($this->currency);
+        if ($products !== []) {
+            $data['products'] = $products;
+        }
+
+        if ($this->value !== null) {
+            $data['value'] = $this->value;
+        }
+
+        if ($this->currency !== null) {
+            $data['currency'] = $this->currency;
         }
 
         return $this->addParamsToArray($data);
