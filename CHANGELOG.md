@@ -3,6 +3,32 @@
 All notable changes to the AxiTrace PHP SDK are documented in this file.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0]
+
+### Added
+
+- Products on lead events: `FormSubmitEvent`, `SubscribeEvent`, `StartTrialEvent` and
+  `CustomEvent` gain `addProduct()` and `setProducts()` with the `TransactionEvent` signatures,
+  accepting an `AxiTrace\Model\Product` or a plain array in the transaction line shape. They are
+  sent as a root `products` array on `/v1/form/submit`, `/v1/subscribe`, `/v1/start_trial` and
+  `/v1/custom-events`.
+- `FormSubmitEvent::setValue()` and `SubscribeEvent::setValue()` send a root `value` and
+  `currency` (context for the Leads workspace, never revenue).
+- `SubscribeEvent::setEventSalt()` and `StartTrialEvent::setEventSalt()`: a retried submission
+  with the same salt is stored once.
+- The `formSubmit()`, `subscribe()` and `startTrial()` helpers read `products` and `eventSalt`
+  (and on `formSubmit()` / `subscribe()` `value` with `currency`) from their existing `$params`.
+
+### Notes
+
+- Products are always optional and never stop a lead: a line without `sku`, `name`, a readable
+  `finalUnitPrice` or a `quantity` above 0, or in another currency than the event value (or,
+  without one, than the first priced line), is dropped while the event is still sent.
+  `unitCost` is never sent on a lead event.
+- `TransactionEvent` behavior is unchanged; product normalization moved into the shared
+  `AxiTrace\Model\ProductNormalizer`.
+- Calls that do not use the new methods send exactly the same payload as before.
+
 ## [1.11.0]
 
 ### Added

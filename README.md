@@ -123,8 +123,14 @@ $event = new CustomEvent(
     'dedup-id-1'                  // caller-supplied event_id (safe to retry)
 );
 
+// Optional (1.12.0): the products the event is about, priced in the event currency.
+$event->addProduct(['sku' => 'MENU-SALAD', 'name' => 'Salad menu', 'finalUnitPrice' => 14.95, 'quantity' => 10]);
+
 $axiTrace->events()->send($event);
 ```
+
+A custom event selected as a lead source in the workspace (Settings > Leads) appears in
+Leads; see [Lead products](#lead-products-form-submit-subscribe-start-trial-custom-event).
 
 ### Page View
 
@@ -366,7 +372,10 @@ use AxiTrace\Model\Event\SubscribeEvent;
 
 $event = (new SubscribeEvent('subscriber@example.com'))
     ->setClientId('visitor-123')
-    ->setSubscriptionType('newsletter');
+    ->setSubscriptionType('newsletter')
+    ->setEventSalt('subscription-2001')   // optional (1.12.0): a retry is stored once
+    ->setValue(29.00, 'EUR')              // optional (1.12.0): context, never revenue
+    ->addProduct(['sku' => 'BOX-M', 'name' => 'Monthly box', 'finalUnitPrice' => 29.00, 'quantity' => 1]);
 
 $axiTrace->events()->send($event);
 ```
@@ -379,7 +388,9 @@ use AxiTrace\Model\Event\StartTrialEvent;
 $event = (new StartTrialEvent('Pro Plan'))
     ->setClientId('visitor-123')
     ->setTrialPeriodDays(14)
-    ->setTrialValue(49.99, 'USD');
+    ->setTrialValue(49.99, 'USD')
+    ->setEventSalt('trial-3001')          // optional (1.12.0): a retry is stored once
+    ->addProduct(['sku' => 'PLAN-PRO', 'name' => 'Pro Plan', 'finalUnitPrice' => 49.99, 'quantity' => 1]);
 
 $axiTrace->events()->send($event);
 ```
@@ -404,6 +415,7 @@ $axiTrace->events()->send($event);
 
 ```php
 use AxiTrace\Model\Event\FormSubmitEvent;
+use AxiTrace\Model\Product;
 
 $event = (new FormSubmitEvent('contact-form'))
     ->setClientCustomId('visitor-123')
@@ -413,10 +425,59 @@ $event = (new FormSubmitEvent('contact-form'))
         'first_name' => 'John',
         'last_name' => 'Doe',
         'message' => 'Hello!',
-    ]);
+    ])
+    ->setEventSalt('quote-1001')          // a retry is stored once
+    ->setValue(1200.00, 'EUR')            // optional (1.12.0): context, never revenue
+    ->addProduct((new Product('SOFA-3'))->setItemName('Three-seat sofa')->setPrice(1200.00)->setQuantity(1));
 
 $axiTrace->events()->send($event);
 ```
+
+### Lead products (form submit, subscribe, start trial, custom event)
+
+From 1.12.0, `FormSubmitEvent`, `SubscribeEvent`, `StartTrialEvent` and `CustomEvent` carry the
+products a lead is about, with the same `addProduct()` / `setProducts()` signatures as
+`TransactionEvent`: each entry is an `AxiTrace\Model\Product` (sku falls back to the item ID,
+quantity to 1) or a plain array in the transaction line shape (`sku`, `name`, `quantity`,
+`finalUnitPrice`, and the optional `categories`, `image`, `url`, `netUnitPrice`, `tax`,
+`regularPrice`, `discountPrice`, `discountPercent`, `externalId`). They are sent as a root
+`products` array and appear on the lead in the AxiTrace Leads workspace.
+
+- **Optional.** A lead without products is a complete lead. Calls that do not use the new
+  methods send exactly the same payload as before.
+- **An invalid line is dropped, the event is always sent.** A line is kept only with a non-empty
+  `sku` and `name`, a readable `finalUnitPrice` and an integer `quantity` above 0. Unlike
+  `TransactionEvent`, a lead event never throws for product content; only an entry that is
+  neither an array nor a `Product` throws `ValidationException`.
+- **One currency.** Lines must be in the event value currency (`setValue()` on form submit and
+  subscribe, `setTrialValue()` on a trial, the constructor currency on a custom event). Without
+  one, the first line whose price names a currency (`['amount' => 29.00, 'currency' => 'EUR']`)
+  sets it; a line in another currency, or a bare-number price when no currency is known at all,
+  is dropped.
+- **`unitCost` is never sent on a lead event** (product costs belong on the transaction).
+- **Value is context, never revenue.** `FormSubmitEvent::setValue()` and
+  `SubscribeEvent::setValue()` send root `value` and `currency`.
+- **Retry identity.** `SubscribeEvent::setEventSalt()` and `StartTrialEvent::setEventSalt()`
+  join the existing `FormSubmitEvent::setEventSalt()`: a retried submission with the same salt
+  is stored once. Custom events keep their `event_id`.
+
+The helpers read the same fields from their existing `$params` argument, so no signature
+changes: `products` (a list of lines) and `eventSalt` on `formSubmit()`, `subscribe()` and
+`startTrial()`, and `value` together with `currency` on `formSubmit()` and `subscribe()`
+(the trial value stays `trial_value` / `trial_currency`):
+
+```php
+$axiTrace->formSubmit('quote-request', ['email' => 'jane@example.com'], [
+    'eventSalt' => 'quote-1001',
+    'value' => 1200.00,
+    'currency' => 'EUR',
+    'products' => [
+        ['sku' => 'SOFA-3', 'name' => 'Three-seat sofa', 'finalUnitPrice' => 1200.00, 'quantity' => 1],
+    ],
+]);
+```
+
+Full rules: https://axitrace.com/docs/leads#products
 
 ### View Item List
 
@@ -794,7 +855,7 @@ See the `examples/` directory for complete usage examples:
 
 - `basic-usage.php` - Page views and product views
 - `ecommerce-tracking.php` - Full e-commerce flow, including a transaction with `eventSalt` and correctly-shaped products
-- `form-tracking.php` - Forms, subscriptions, trials, and search
+- `form-tracking.php` - Forms, subscriptions, trials, and search, including lead products and value
 - `catalog-tracking.php` - Item lists, selecting an item, and removing from cart
 - `queue-transaction.php` - Sending a transaction from a queue/cron job with `withContext()`
 
