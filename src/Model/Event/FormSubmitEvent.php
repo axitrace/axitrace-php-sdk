@@ -15,6 +15,7 @@ use AxiTrace\Model\ClientIdentity;
 class FormSubmitEvent extends AbstractEvent
 {
     use LeadProductsTrait;
+    use LeadMessageTrait;
 
     /**
      * @var string
@@ -243,6 +244,6 @@ class FormSubmitEvent extends AbstractEvent
             $data['currency'] = $this->currency;
         }
 
-        return $data;
+        return $this->withLeadMessage($data);
     }
 }

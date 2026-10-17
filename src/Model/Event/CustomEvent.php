@@ -25,6 +25,7 @@ use AxiTrace\Exception\ValidationException;
 final class CustomEvent extends AbstractEvent
 {
     use LeadProductsTrait;
+    use LeadMessageTrait;
 
     /** The key pattern every custom event key follows (A9). */
     public const KEY_PATTERN = '/^[a-z][a-z0-9_]{0,39}$/';
@@ -138,7 +139,7 @@ final class CustomEvent extends AbstractEvent
             $payload['products'] = $products;
         }
 
-        return $payload;
+        return $this->withLeadMessage($payload);
     }
 
     public function validate(): void

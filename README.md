@@ -479,6 +479,37 @@ $axiTrace->formSubmit('quote-request', ['email' => 'jane@example.com'], [
 
 Full rules: https://axitrace.com/docs/leads#products
 
+### Lead message (form submit, subscribe, start trial, custom event)
+
+The free text a visitor types into an inquiry form ("Your remarks, requests, suggestions for the
+order") is a lead's `message`. Set it with `setMessage()` on any of the four lead events, or pass
+a string `message` in the helpers' `$params`; it is sent as a root `message` and shown on the lead
+in the AxiTrace Leads workspace.
+
+```php
+$axiTrace->formSubmit('quote-request', ['email' => 'jane@example.com', 'phone' => '+48600100200'], [
+    'message' => "Is the chair available in pink?\nPlease call after 5 pm.",
+]);
+
+$event = (new FormSubmitEvent('quote-request'))
+    ->setClientEmail('jane@example.com')
+    ->setFormParams(['email' => 'jane@example.com'])
+    ->setMessage($_POST['remarks'] ?? '');
+```
+
+- **Plain text.** Markup is kept as text and is never rendered as HTML; send what the visitor
+  typed, do not escape it yourself.
+- **Normalized before sending** (the API applies the same rule): line breaks become `\n`,
+  control characters except newline and tab are removed, and so are invisible bidi override
+  marks; trailing spaces and more than two blank lines in a row are removed; Unicode NFC when
+  ext-intl is installed.
+- **At most 5000 characters.** A longer message is cut and ends with an ellipsis; the event is
+  always sent. A whitespace-only message is not sent.
+- **Personal data.** It is shown only to users who may see contact data, erased with the
+  contact on a GDPR request, and never forwarded to ad platforms.
+- `$formData` of `formSubmit()` is sent as it is: a form field called `message` stays a form
+  field. Only `$params['message']` (a string) becomes the lead message.
+
 ### View Item List
 
 ```php

@@ -15,7 +15,7 @@ use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 
 /**
- * formSubmit/subscribe/startTrial read products, value, currency and eventSalt from $params.
+ * formSubmit/subscribe/startTrial read products, value, currency, eventSalt and message from $params.
  *
  * @covers \AxiTrace\AxiTrace
  */
@@ -108,6 +108,33 @@ final class AxiTraceLeadProductsTest extends TestCase
         }
 
         self::assertSame([], $this->requestHistory);
+    }
+
+    public function testHelpersSendAStringMessageAtTheRoot(): void
+    {
+        $axiTrace = $this->createAxiTrace();
+        $axiTrace->formSubmit('inquiry', ['email' => 'user@example.com', 'message' => 'form field'], ['message' => "Is it pink?\r\nThanks"]);
+        $axiTrace->subscribe('user@example.com', ['message' => 'Weekly please']);
+        $axiTrace->startTrial('Pro', ['message' => '  Call me  ']);
+
+        $bodies = array_map(static function (string $body): array {
+            return json_decode($body, true);
+        }, $this->sentBodies());
+
+        self::assertSame("Is it pink?\nThanks", $bodies[0]['message']);
+        self::assertSame('form field', $bodies[0]['params']['message'], 'formData is sent as it is');
+        self::assertSame('Weekly please', $bodies[1]['message']);
+        self::assertArrayNotHasKey('params', $bodies[1]);
+        self::assertSame('Call me', $bodies[2]['message']);
+    }
+
+    public function testANonStringMessageParamStaysInParams(): void
+    {
+        $this->createAxiTrace()->subscribe('user@example.com', ['message' => ['nested' => true]]);
+
+        $body = json_decode($this->sentBodies()[0], true);
+        self::assertArrayNotHasKey('message', $body);
+        self::assertSame(['message' => ['nested' => true]], $body['params']);
     }
 
     private function createAxiTrace(): AxiTrace

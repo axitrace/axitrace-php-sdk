@@ -14,6 +14,7 @@ use AxiTrace\Exception\ValidationException;
 class SubscribeEvent extends AbstractEvent
 {
     use LeadProductsTrait;
+    use LeadMessageTrait;
 
     /**
      * @var string
@@ -150,6 +151,6 @@ class SubscribeEvent extends AbstractEvent
             $data['currency'] = $this->currency;
         }
 
-        return $this->addParamsToArray($data);
+        return $this->addParamsToArray($this->withLeadMessage($data));
     }
 }

@@ -14,6 +14,7 @@ use AxiTrace\Exception\ValidationException;
 class StartTrialEvent extends AbstractEvent
 {
     use LeadProductsTrait;
+    use LeadMessageTrait;
 
     /**
      * @var string
@@ -186,6 +187,6 @@ class StartTrialEvent extends AbstractEvent
             $data['products'] = $products;
         }
 
-        return $this->addParamsToArray($data);
+        return $this->addParamsToArray($this->withLeadMessage($data));
     }
 }

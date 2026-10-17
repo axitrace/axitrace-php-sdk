@@ -18,6 +18,11 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the same salt is stored once.
 - The `formSubmit()`, `subscribe()` and `startTrial()` helpers read `products` and `eventSalt`
   (and on `formSubmit()` / `subscribe()` `value` with `currency`) from their existing `$params`.
+- Lead message: `setMessage()` / `getMessage()` on `FormSubmitEvent`, `SubscribeEvent`,
+  `StartTrialEvent` and `CustomEvent` send the visitor's inquiry text as a root `message`
+  (plain text, normalized by `AxiTrace\Model\MessageNormalizer`, at most 5000 characters,
+  a longer one is cut with an ellipsis). The `formSubmit()`, `subscribe()` and `startTrial()`
+  helpers take a string `message` from `$params`; a non-string `message` stays in params.
 
 ### Notes
 

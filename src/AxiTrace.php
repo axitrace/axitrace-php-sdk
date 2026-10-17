@@ -1447,8 +1447,9 @@ class AxiTrace
      * Track subscription.
      *
      * Besides subscription_type, $params may carry "eventSalt" (retry identity),
-     * "products" (lines in the transaction product shape; invalid lines are dropped) and
-     * "value" with "currency"; everything else is sent as params.
+     * "products" (lines in the transaction product shape; invalid lines are dropped),
+     * "value" with "currency" and "message" (the visitor's inquiry text, a string);
+     * everything else is sent as params.
      *
      * @param string $email
      * @param array<string, mixed> $params
@@ -1481,6 +1482,11 @@ class AxiTrace
             $event->setValue($value[0], $value[1]);
         }
 
+        $message = self::pullLeadMessage($params);
+        if ($message !== null) {
+            $event->setMessage($message);
+        }
+
         if (!empty($params)) {
             $event->setParams($params);
         }
@@ -1491,8 +1497,9 @@ class AxiTrace
     /**
      * Track start trial.
      *
-     * Besides the trial fields, $params may carry "eventSalt" (retry identity) and
-     * "products" (lines in the transaction product shape; invalid lines are dropped).
+     * Besides the trial fields, $params may carry "eventSalt" (retry identity),
+     * "products" (lines in the transaction product shape; invalid lines are dropped) and
+     * "message" (the visitor's inquiry text, a string).
      * The trial value stays trial_value with trial_currency.
      *
      * @param string $planName
@@ -1534,6 +1541,11 @@ class AxiTrace
         $products = self::pullLeadProducts($params);
         if ($products !== null) {
             $event->setProducts($products);
+        }
+
+        $message = self::pullLeadMessage($params);
+        if ($message !== null) {
+            $event->setMessage($message);
         }
 
         if (!empty($params)) {
@@ -1593,8 +1605,10 @@ class AxiTrace
      * Track form submit.
      *
      * $params may carry "eventSalt" (retry identity), "products" (lines in the transaction
-     * product shape; invalid lines are dropped) and "value" with "currency"; everything
-     * else is sent as params.
+     * product shape; invalid lines are dropped), "value" with "currency" and "message"
+     * (the visitor's inquiry text, a string, sent as the root message); everything else is
+     * sent as params. $formData is sent as it is: a form field called "message" stays a
+     * form field.
      *
      * @param string $label
      * @param array<string, mixed> $formData
@@ -1629,6 +1643,11 @@ class AxiTrace
         $value = self::pullLeadValue($params);
         if ($value !== null) {
             $event->setValue($value[0], $value[1]);
+        }
+
+        $message = self::pullLeadMessage($params);
+        if ($message !== null) {
+            $event->setMessage($message);
         }
 
         // Set client identity
@@ -1798,6 +1817,25 @@ class AxiTrace
         unset($params['products']);
 
         return array_values($products);
+    }
+
+    /**
+     * Take the inquiry message of a lead event out of the helper params, when it is a string.
+     * Any other type stays in params, as before the message existed.
+     *
+     * @param array<string, mixed> $params
+     * @return string|null
+     */
+    private static function pullLeadMessage(array &$params): ?string
+    {
+        if (!isset($params['message']) || !is_string($params['message'])) {
+            return null;
+        }
+
+        $message = $params['message'];
+        unset($params['message']);
+
+        return $message;
     }
 
     /**
